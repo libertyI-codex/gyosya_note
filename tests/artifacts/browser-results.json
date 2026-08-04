@@ -1,0 +1,119 @@
+{
+  "generatedAt": "2026-08-04T08:52:40.382Z",
+  "passed": 28,
+  "failed": 0,
+  "results": [
+    {
+      "name": "初回サンプル3社・再読込で重複しない",
+      "status": "PASS"
+    },
+    {
+      "name": "業者名だけで保存",
+      "status": "PASS"
+    },
+    {
+      "name": "全項目・複数エリア・複数対象・温度感・お気に入りを保存",
+      "status": "PASS"
+    },
+    {
+      "name": "編集できる",
+      "status": "PASS"
+    },
+    {
+      "name": "複製・重複警告後の続行",
+      "status": "PASS"
+    },
+    {
+      "name": "削除確認・削除・取り消し",
+      "status": "PASS"
+    },
+    {
+      "name": "エリア・対象・AND/OR検索",
+      "status": "PASS"
+    },
+    {
+      "name": "業者名・担当者・メモ・電話検索",
+      "status": "PASS"
+    },
+    {
+      "name": "お気に入り・積極的・条件解除",
+      "status": "PASS"
+    },
+    {
+      "name": "tel・mailtoと未登録時の非表示",
+      "status": "PASS"
+    },
+    {
+      "name": "業者名・お気に入り・温度感・更新日・登録日順",
+      "status": "PASS"
+    },
+    {
+      "name": "JSON保存とCSV出力",
+      "status": "PASS"
+    },
+    {
+      "name": "不正JSONを拒否し既存データを保持",
+      "status": "PASS"
+    },
+    {
+      "name": "JSON追加復元",
+      "status": "PASS"
+    },
+    {
+      "name": "JSON置換復元",
+      "status": "PASS"
+    },
+    {
+      "name": "同じ業者名と電話番号で重複警告・続行",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP起動・IndexedDB・Console未処理エラーなし",
+      "status": "PASS"
+    },
+    {
+      "name": "390×844で操作・横スクロールなし・44pxタップ領域",
+      "status": "PASS"
+    },
+    {
+      "name": "390×500でダイアログ最下部・固定見出し・保存操作",
+      "status": "PASS"
+    },
+    {
+      "name": "1440pxでPCレイアウトが崩れない",
+      "status": "PASS"
+    },
+    {
+      "name": "レスポンシブConsole未処理エラーなし",
+      "status": "PASS"
+    },
+    {
+      "name": "file://直接起動・登録・再読込・検索・編集",
+      "status": "PASS"
+    },
+    {
+      "name": "file://でJSON・CSV出力",
+      "status": "PASS"
+    },
+    {
+      "name": "file://でService Worker未登録・Console未処理エラーなし",
+      "status": "PASS"
+    },
+    {
+      "name": "PWA manifest・Service Worker起動",
+      "status": "PASS"
+    },
+    {
+      "name": "オフライン再起動・IndexedDBデータ保持",
+      "status": "PASS"
+    },
+    {
+      "name": "旧アプリキャッシュだけ削除し無関係キャッシュを保持",
+      "status": "PASS"
+    },
+    {
+      "name": "PWA・オフラインConsole未処理エラーなし",
+      "status": "PASS"
+    }
+  ]
+}

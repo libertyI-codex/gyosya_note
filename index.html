@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1b2d">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="不動産の買取案件に合う買取業者を、エリア・物件種別・温度感から素早く探す端末内保存アプリです。">
+  <title>買取業者ノート</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+  <link rel="stylesheet" href="./css/styles.css">
+  <script defer src="./js/constants.js"></script>
+  <script defer src="./js/utils.js"></script>
+  <script defer src="./js/db.js"></script>
+  <script defer src="./js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">本文へ移動</a>
+
+  <header class="app-header">
+    <div class="app-header__inner">
+      <div class="brand-mark" aria-hidden="true">買</div>
+      <div class="brand-copy">
+        <h1>買取業者ノート</h1>
+        <p>この物件なら、どこへ相談する？</p>
+      </div>
+      <span class="version-badge">Ver.1.0 試作1</span>
+    </div>
+  </header>
+
+  <noscript>
+    <div class="fatal-banner">このアプリの利用にはJavaScriptを有効にしてください。</div>
+  </noscript>
+
+  <div id="fatal-error" class="fatal-banner" role="alert" hidden></div>
+  <div id="connection-status" class="connection-status" role="status" hidden>オフラインで使用中</div>
+
+  <main id="main-content" class="app-main" tabindex="-1">
+    <section id="screen-search" class="screen is-active" data-screen="search" aria-labelledby="search-title">
+      <div class="screen-heading">
+        <div>
+          <p class="eyebrow">QUICK SEARCH</p>
+          <h2 id="search-title">探す</h2>
+          <p>エリアと買取対象を選ぶだけで候補を絞れます。</p>
+        </div>
+      </div>
+
+      <div class="search-layout">
+        <section class="filter-panel" aria-label="検索条件">
+          <div class="filter-group">
+            <div class="label-row">
+              <h3 id="search-area-label">買取エリア</h3>
+              <span>複数選択可</span>
+            </div>
+            <div id="search-area-chips" class="chip-group" data-chip-group="search-areas" role="group" aria-labelledby="search-area-label"></div>
+          </div>
+
+          <div class="filter-group">
+            <div class="label-row">
+              <h3 id="search-property-label">買取対象</h3>
+              <span>複数選択可</span>
+            </div>
+            <div id="search-property-chips" class="chip-group" data-chip-group="search-property-types" role="group" aria-labelledby="search-property-label"></div>
+          </div>
+
+          <div class="filter-group">
+            <h3>温度感</h3>
+            <div id="search-temperature" class="segmented-control" role="group" aria-label="温度感">
+              <button type="button" class="is-selected" data-temperature="すべて" aria-pressed="true">すべて</button>
+              <button type="button" data-temperature="積極的" aria-pressed="false">積極的</button>
+              <button type="button" data-temperature="通常" aria-pressed="false">通常</button>
+              <button type="button" data-temperature="現在休止" aria-pressed="false">現在休止</button>
+            </div>
+          </div>
+
+          <div class="filter-group filter-group--compact">
+            <label class="switch-row" for="search-favorite-only">
+              <span>
+                <strong>お気に入りのみ</strong>
+                <small>星を付けた業者に絞る</small>
+              </span>
+              <span class="switch-control">
+                <input id="search-favorite-only" type="checkbox">
+                <span aria-hidden="true"></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="filter-group">
+            <label for="search-query">フリーワード</label>
+            <div class="search-input-wrap">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+              <input id="search-query" type="search" inputmode="search" autocomplete="off" placeholder="業者名・担当者・電話・メモ">
+            </div>
+          </div>
+
+          <button id="clear-search" type="button" class="button button--quiet button--full">条件をすべて解除</button>
+        </section>
+
+        <section class="result-panel" aria-labelledby="search-results-title">
+          <div class="result-header">
+            <div>
+              <h3 id="search-results-title">検索結果</h3>
+              <p id="search-result-count" aria-live="polite">読み込み中</p>
+            </div>
+            <span class="sort-note">星・温度感を優先</span>
+          </div>
+          <div id="search-results" class="company-list" aria-busy="true"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="screen-list" class="screen" data-screen="list" aria-labelledby="list-title" hidden>
+      <div class="screen-heading screen-heading--with-count">
+        <div>
+          <p class="eyebrow">COMPANIES</p>
+          <h2 id="list-title">業者一覧</h2>
+          <p id="list-summary">登録業者を一覧で確認します。</p>
+        </div>
+        <span id="list-count-badge" class="count-badge">0社</span>
+      </div>
+
+      <section class="list-toolbar" aria-label="一覧の絞り込みと並び替え">
+        <div class="toolbar-primary">
+          <label class="visually-hidden" for="list-query">業者名検索</label>
+          <div class="search-input-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="list-query" type="search" inputmode="search" autocomplete="off" placeholder="業者名を検索">
+          </div>
+          <label class="select-field" for="list-sort">
+            <span>並び替え</span>
+            <select id="list-sort">
+              <option value="name">業者名順</option>
+              <option value="favorite">お気に入り順</option>
+              <option value="temperature">温度感順</option>
+              <option value="updated">更新が新しい順</option>
+              <option value="created">登録が新しい順</option>
+            </select>
+          </label>
+        </div>
+
+        <details id="list-filter-details" class="filter-disclosure">
+          <summary>さらに絞り込む <span id="list-active-filter-count"></span></summary>
+          <div class="compact-filter-grid">
+            <label class="checkbox-field" for="list-favorite-only">
+              <input id="list-favorite-only" type="checkbox">
+              <span>お気に入りのみ</span>
+            </label>
+            <label class="select-field" for="list-temperature">
+              <span>温度感</span>
+              <select id="list-temperature">
+                <option value="すべて">すべて</option>
+                <option value="積極的">積極的</option>
+                <option value="通常">通常</option>
+                <option value="現在休止">現在休止</option>
+              </select>
+            </label>
+            <label class="select-field" for="list-area">
+              <span>エリア</span>
+              <select id="list-area"><option value="">すべて</option></select>
+            </label>
+            <label class="select-field" for="list-property-type">
+              <span>買取対象</span>
+              <select id="list-property-type"><option value="">すべて</option></select>
+            </label>
+          </div>
+          <button id="clear-list-filters" type="button" class="button button--quiet">一覧の絞り込みを解除</button>
+        </details>
+      </section>
+
+      <div id="company-list" class="company-list company-list--grid" aria-busy="true"></div>
+    </section>
+
+    <section id="screen-other" class="screen" data-screen="other" aria-labelledby="other-title" hidden>
+      <div class="screen-heading">
+        <div>
+          <p class="eyebrow">DATA &amp; INFO</p>
+          <h2 id="other-title">その他</h2>
+          <p>端末内データの保護とアプリ設定を行います。</p>
+        </div>
+      </div>
+
+      <section class="summary-card" aria-labelledby="stats-title">
+        <div class="section-title-row">
+          <h3 id="stats-title">登録件数</h3>
+          <span id="storage-mode-label" class="storage-badge">端末内保存</span>
+        </div>
+        <div class="stat-grid">
+          <div><strong id="stat-total">0</strong><span>登録業者</span></div>
+          <div><strong id="stat-favorite">0</strong><span>お気に入り</span></div>
+          <div><strong id="stat-active">0</strong><span>積極的</span></div>
+          <div><strong id="stat-paused">0</strong><span>現在休止</span></div>
+        </div>
+      </section>
+
+      <div class="settings-stack">
+        <details class="settings-card">
+          <summary>
+            <span class="settings-icon" aria-hidden="true">↥</span>
+            <span><strong>データのバックアップ</strong><small>JSON保存・復元・CSV出力</small></span>
+          </summary>
+          <div class="settings-card__body">
+            <p>業者情報と設定を1つのJSONファイルへ保存できます。定期的な保存をおすすめします。</p>
+            <div class="action-list">
+              <button id="export-json" type="button" class="button button--secondary">JSONバックアップを保存</button>
+              <button id="choose-restore-file" type="button" class="button button--secondary">JSONから復元</button>
+              <input id="restore-file-input" type="file" accept="application/json,.json" hidden>
+              <button id="export-csv" type="button" class="button button--secondary">CSVを出力</button>
+            </div>
+            <p class="help-text">JSON復元は「追加」または「置換」を選べます。CSV入力には対応していません。</p>
+          </div>
+        </details>
+
+        <details class="settings-card">
+          <summary>
+            <span class="settings-icon" aria-hidden="true">⚙</span>
+            <span><strong>詳細設定</strong><small>候補の編集・危険な操作</small></span>
+          </summary>
+          <div class="settings-card__body">
+            <div class="action-list">
+              <button id="open-option-settings" type="button" class="button button--secondary">エリア・買取対象候補を編集</button>
+              <button id="delete-samples" type="button" class="button button--quiet">サンプルデータをすべて削除</button>
+            </div>
+            <div class="danger-zone">
+              <h4>危険な操作</h4>
+              <p>登録業者と候補設定を初期状態へ戻します。この操作は取り消せません。</p>
+              <button id="delete-all-data" type="button" class="button button--danger">全データを削除</button>
+            </div>
+          </div>
+        </details>
+
+        <details class="settings-card">
+          <summary>
+            <span class="settings-icon" aria-hidden="true">i</span>
+            <span><strong>このアプリについて</strong><small>Kaitori Company Note</small></span>
+          </summary>
+          <div class="settings-card__body about-copy">
+            <p><strong>買取業者ノート</strong> <span>Ver.1.0 試作1</span></p>
+            <p>不動産の買取案件に合う相談先を素早く探すための、ログイン不要・外部サーバー不要の業務用ノートです。</p>
+            <p>データはこの端末のブラウザ内へ保存されます。Safariの履歴・Webサイトデータを削除すると消える可能性があるため、JSONバックアップを定期的に保存してください。</p>
+            <a class="text-link" href="./README.md" target="_blank" rel="noopener">使い方（README）を開く</a>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <button id="add-company-fab" type="button" class="fab" aria-label="新しい買取業者を登録" title="新しい買取業者を登録">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    <span>業者登録</span>
+  </button>
+
+  <nav class="bottom-nav" aria-label="メインメニュー">
+    <div class="bottom-nav__inner">
+      <button type="button" class="is-active" data-nav="search" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+        <span>探す</span>
+      </button>
+      <button type="button" data-nav="list">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13M8 21v-6h8v6M9 10h.01M15 10h.01"/></svg>
+        <span>業者一覧</span>
+      </button>
+      <button type="button" data-nav="other">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
+        <span>その他</span>
+      </button>
+    </div>
+  </nav>
+
+  <dialog id="company-dialog" class="app-dialog" aria-labelledby="company-dialog-title">
+    <form id="company-form" class="dialog-shell" novalidate>
+      <header class="dialog-header">
+        <div>
+          <p id="company-dialog-mode" class="eyebrow">NEW COMPANY</p>
+          <h2 id="company-dialog-title">業者を登録</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog="company-dialog" aria-label="登録画面を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <input id="company-id" type="hidden">
+        <input id="company-created-at" type="hidden">
+        <div id="form-error" class="form-message form-message--error" role="alert" hidden></div>
+        <div id="form-warning" class="form-message form-message--warning" role="status" hidden></div>
+        <div id="duplicate-warning" class="duplicate-warning" role="alert" hidden>
+          <h3>同じ業者の可能性があります</h3>
+          <p>一致する登録があります。既存業者を確認するか、このまま登録できます。</p>
+          <div id="duplicate-list" class="duplicate-list"></div>
+          <button id="continue-duplicate-save" type="button" class="button button--warning">このまま登録を続行</button>
+        </div>
+
+        <section class="form-section" aria-labelledby="basic-fields-title">
+          <div class="form-section__heading">
+            <h3 id="basic-fields-title">基本</h3>
+            <span>必須は業者名だけ</span>
+          </div>
+          <div class="form-grid">
+            <label class="field field--full" for="company-name">
+              <span>業者名 <em>必須</em></span>
+              <input id="company-name" name="companyName" type="text" maxlength="120" autocomplete="organization" required aria-errormessage="form-error" placeholder="例：○○不動産株式会社">
+            </label>
+            <label class="field" for="contact-name">
+              <span>担当者名</span>
+              <input id="contact-name" name="contactName" type="text" maxlength="80" autocomplete="name" placeholder="例：山田さん">
+            </label>
+            <label class="field" for="company-phone">
+              <span>電話番号</span>
+              <input id="company-phone" name="phone" type="tel" inputmode="tel" maxlength="40" autocomplete="tel" placeholder="例：045-123-4567">
+            </label>
+            <label class="field field--full" for="company-email">
+              <span>メールアドレス</span>
+              <input id="company-email" name="email" type="text" inputmode="email" maxlength="160" autocomplete="email" placeholder="例：contact@example.jp">
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section" aria-labelledby="condition-fields-title">
+          <div class="form-section__heading">
+            <h3 id="condition-fields-title">買取条件</h3>
+            <span>未選択でも保存可</span>
+          </div>
+          <fieldset class="chip-fieldset">
+            <legend>買取エリア <small>複数選択可</small></legend>
+            <div id="form-area-chips" class="chip-group" data-chip-group="form-areas"></div>
+          </fieldset>
+          <label class="field field--full" for="custom-area">
+            <span>エリア補足 <small>任意</small></span>
+            <input id="custom-area" name="customArea" type="text" maxlength="120" placeholder="例：横浜市南区中心、鎌倉・逗子">
+          </label>
+          <fieldset class="chip-fieldset">
+            <legend>買取対象 <small>複数選択可</small></legend>
+            <div id="form-property-chips" class="chip-group" data-chip-group="form-property-types"></div>
+          </fieldset>
+          <fieldset class="radio-fieldset">
+            <legend>温度感</legend>
+            <div class="radio-cards">
+              <label><input type="radio" name="temperature" value="積極的"><span><strong>積極的</strong><small>いま優先して相談</small></span></label>
+              <label><input type="radio" name="temperature" value="通常" checked><span><strong>通常</strong><small>通常の相談先</small></span></label>
+              <label><input type="radio" name="temperature" value="現在休止"><span><strong>現在休止</strong><small>仕入れ休止中</small></span></label>
+            </div>
+          </fieldset>
+        </section>
+
+        <section class="form-section" aria-labelledby="other-fields-title">
+          <div class="form-section__heading"><h3 id="other-fields-title">その他</h3></div>
+          <label class="favorite-check" for="company-favorite">
+            <input id="company-favorite" name="isFavorite" type="checkbox">
+            <span class="favorite-star" aria-hidden="true">★</span>
+            <span><strong>お気に入りにする</strong><small>検索結果の上位へ表示</small></span>
+          </label>
+          <label class="field field--full" for="company-memo">
+            <span>一言メモ <small><output id="memo-count">0</output>/500</small></span>
+            <textarea id="company-memo" name="memo" rows="5" maxlength="500" placeholder="例：決裁が早い。再建築不可も相談可。返信はメール希望。"></textarea>
+          </label>
+        </section>
+      </div>
+
+      <footer class="dialog-footer">
+        <button type="button" class="button button--quiet" data-close-dialog="company-dialog">キャンセル</button>
+        <button id="save-company" type="submit" class="button button--primary">保存する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="detail-dialog" class="app-dialog app-dialog--detail" aria-labelledby="detail-dialog-title">
+    <div class="dialog-shell">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">COMPANY DETAIL</p>
+          <h2 id="detail-dialog-title">業者詳細</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog="detail-dialog" aria-label="業者詳細を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div id="detail-content" class="dialog-body detail-body"></div>
+      <footer id="detail-footer" class="dialog-footer dialog-footer--actions"></footer>
+    </div>
+  </dialog>
+
+  <dialog id="restore-dialog" class="app-dialog app-dialog--small" aria-labelledby="restore-dialog-title">
+    <form id="restore-form" class="dialog-shell">
+      <header class="dialog-header">
+        <div><p class="eyebrow">RESTORE</p><h2 id="restore-dialog-title">JSON復元</h2></div>
+        <button type="button" class="icon-button" data-close-dialog="restore-dialog" aria-label="復元画面を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <div id="restore-file-summary" class="restore-summary"></div>
+        <fieldset class="restore-options">
+          <legend>復元方法</legend>
+          <label><input type="radio" name="restoreMode" value="add" checked><span><strong>現在のデータへ追加</strong><small>同じIDは上書きせずスキップします</small></span></label>
+          <label><input type="radio" name="restoreMode" value="replace"><span><strong>現在のデータを置換</strong><small>現在の登録と設定を入れ替えます</small></span></label>
+        </fieldset>
+        <p id="restore-error" class="form-message form-message--error" role="alert" hidden></p>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="button button--quiet" data-close-dialog="restore-dialog">キャンセル</button>
+        <button type="submit" class="button button--primary">復元する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="option-dialog" class="app-dialog" aria-labelledby="option-dialog-title">
+    <form id="option-form" class="dialog-shell">
+      <header class="dialog-header">
+        <div><p class="eyebrow">OPTIONS</p><h2 id="option-dialog-title">候補を編集</h2></div>
+        <button type="button" class="icon-button" data-close-dialog="option-dialog" aria-label="候補編集を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <p class="intro-copy">1行につき1候補を入力します。保存済み業者の選択内容は、候補から削除しても失われません。</p>
+        <label class="field field--full" for="area-options-text">
+          <span>エリア候補</span>
+          <textarea id="area-options-text" rows="12"></textarea>
+        </label>
+        <label class="field field--full" for="property-options-text">
+          <span>買取対象候補</span>
+          <textarea id="property-options-text" rows="16"></textarea>
+        </label>
+        <p id="option-error" class="form-message form-message--error" role="alert" hidden></p>
+        <button id="reset-options" type="button" class="button button--quiet">初期候補へ戻す</button>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="button button--quiet" data-close-dialog="option-dialog">キャンセル</button>
+        <button type="submit" class="button button--primary">候補を保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="loading-overlay" class="loading-overlay" aria-label="処理中" aria-modal="true" tabindex="-1">
+    <span class="spinner" aria-hidden="true"></span>
+    <span id="loading-message" role="status" aria-live="polite">読み込み中</span>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-message"></span>
+    <button id="toast-action" type="button" hidden>元に戻す</button>
+    <button id="toast-close" type="button" aria-label="通知を閉じる" title="閉じる">×</button>
+  </div>
+</body>
+</html>
