@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f1b2d">
   <meta name="color-scheme" content="light">
-  <meta name="description" content="不動産の買取案件に合う買取業者を、エリア・物件種別・温度感から素早く探す端末内保存アプリです。">
+  <meta name="description" content="不動産の買取案件と業者回答を端末内へ記録し、条件に合う買取業者や類似案件を素早く確認できるアプリです。">
   <title>買取業者ノート</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
@@ -14,6 +14,7 @@
   <script defer src="./js/constants.js"></script>
   <script defer src="./js/utils.js"></script>
   <script defer src="./js/db.js"></script>
+  <script defer src="./js/cases-ui.js"></script>
   <script defer src="./js/app.js"></script>
 </head>
 <body>
@@ -26,7 +27,7 @@
         <h1>買取業者ノート</h1>
         <p>この物件なら、どこへ相談する？</p>
       </div>
-      <span class="version-badge">Ver.1.0 試作1</span>
+      <span class="version-badge">Ver.1.0 試作2</span>
     </div>
   </header>
 
@@ -112,11 +113,69 @@
       </div>
     </section>
 
+    <section id="screen-cases" class="screen" data-screen="cases" aria-labelledby="cases-title" hidden>
+      <div class="screen-heading screen-heading--with-count">
+        <div>
+          <p class="eyebrow">CASES</p>
+          <h2 id="cases-title">案件</h2>
+          <p id="case-list-summary">買取案件と業者からの回答を確認します。</p>
+        </div>
+        <span id="case-count-badge" class="count-badge" aria-live="polite">0件</span>
+      </div>
+
+      <section class="list-toolbar case-toolbar" aria-label="案件の検索、絞り込み、並び替え">
+        <div class="toolbar-primary case-toolbar__primary">
+          <label class="visually-hidden" for="case-query">案件を検索</label>
+          <div class="search-input-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="case-query" type="search" inputmode="search" autocomplete="off" placeholder="案件名・所在地・メモを検索">
+          </div>
+          <label class="select-field" for="case-progress-filter">
+            <span>進捗</span>
+            <select id="case-progress-filter">
+              <option value="">すべて</option>
+            </select>
+          </label>
+          <label class="select-field" for="case-sort">
+            <span>並び替え</span>
+            <select id="case-sort">
+              <option value="updated">更新が新しい順</option>
+              <option value="created">登録が新しい順</option>
+              <option value="name">案件名順</option>
+              <option value="amount">最高回答額順</option>
+              <option value="waiting">回答待ち優先</option>
+            </select>
+          </label>
+        </div>
+
+        <details id="case-filter-details" class="filter-disclosure">
+          <summary>さらに絞り込む <span id="case-active-filter-count"></span></summary>
+          <div class="compact-filter-grid case-filter-grid">
+            <label class="select-field" for="case-area-filter">
+              <span>エリア</span>
+              <select id="case-area-filter"><option value="">すべて</option></select>
+            </label>
+            <label class="select-field" for="case-type-filter">
+              <span>物件種別</span>
+              <select id="case-type-filter"><option value="">すべて</option></select>
+            </label>
+            <label class="select-field" for="case-factor-filter">
+              <span>案件要因</span>
+              <select id="case-factor-filter"><option value="">すべて</option></select>
+            </label>
+          </div>
+          <button id="clear-case-filters" type="button" class="button button--quiet">案件の絞り込みを解除</button>
+        </details>
+      </section>
+
+      <div id="case-list" class="case-list" aria-busy="true"></div>
+    </section>
+
     <section id="screen-list" class="screen" data-screen="list" aria-labelledby="list-title" hidden>
       <div class="screen-heading screen-heading--with-count">
         <div>
           <p class="eyebrow">COMPANIES</p>
-          <h2 id="list-title">業者一覧</h2>
+          <h2 id="list-title">業者</h2>
           <p id="list-summary">登録業者を一覧で確認します。</p>
         </div>
         <span id="list-count-badge" class="count-badge">0社</span>
@@ -192,7 +251,18 @@
           <div><strong id="stat-favorite">0</strong><span>お気に入り</span></div>
           <div><strong id="stat-active">0</strong><span>積極的</span></div>
           <div><strong id="stat-paused">0</strong><span>現在休止</span></div>
+          <div><strong id="stat-cases-active">0</strong><span>進行中案件</span></div>
+          <div><strong id="stat-response-waiting">0</strong><span>回答待ち</span></div>
+          <div><strong id="stat-followup">0</strong><span>次回確認予定</span></div>
         </div>
+      </section>
+
+      <section class="summary-card follow-up-card" aria-labelledby="follow-up-title">
+        <div class="section-title-row">
+          <h3 id="follow-up-title">次回確認</h3>
+          <span class="sort-note">日付順</span>
+        </div>
+        <div id="follow-up-overview" class="follow-up-overview"></div>
       </section>
 
       <div class="settings-stack">
@@ -202,12 +272,13 @@
             <span><strong>データのバックアップ</strong><small>JSON保存・復元・CSV出力</small></span>
           </summary>
           <div class="settings-card__body">
-            <p>業者情報と設定を1つのJSONファイルへ保存できます。定期的な保存をおすすめします。</p>
+            <p>業者・案件・各社回答と設定を1つのJSONファイルへ保存できます。定期的な保存をおすすめします。</p>
             <div class="action-list">
               <button id="export-json" type="button" class="button button--secondary">JSONバックアップを保存</button>
               <button id="choose-restore-file" type="button" class="button button--secondary">JSONから復元</button>
               <input id="restore-file-input" type="file" accept="application/json,.json" hidden>
               <button id="export-csv" type="button" class="button button--secondary">CSVを出力</button>
+              <button id="export-cases-csv" type="button" class="button button--secondary">案件・回答CSVを出力</button>
             </div>
             <p class="help-text">JSON復元は「追加」または「置換」を選べます。CSV入力には対応していません。</p>
           </div>
@@ -220,12 +291,13 @@
           </summary>
           <div class="settings-card__body">
             <div class="action-list">
-              <button id="open-option-settings" type="button" class="button button--secondary">エリア・買取対象候補を編集</button>
+              <button id="open-advanced-settings" type="button" class="button button--secondary">案件・アーカイブ設定を開く</button>
+              <button id="open-option-settings" type="button" class="button button--secondary">業者の候補を編集</button>
               <button id="delete-samples" type="button" class="button button--quiet">サンプルデータをすべて削除</button>
             </div>
             <div class="danger-zone">
               <h4>危険な操作</h4>
-              <p>登録業者と候補設定を初期状態へ戻します。この操作は取り消せません。</p>
+              <p>登録業者・案件・回答と候補設定を初期状態へ戻します。この操作は取り消せません。</p>
               <button id="delete-all-data" type="button" class="button button--danger">全データを削除</button>
             </div>
           </div>
@@ -237,8 +309,8 @@
             <span><strong>このアプリについて</strong><small>Kaitori Company Note</small></span>
           </summary>
           <div class="settings-card__body about-copy">
-            <p><strong>買取業者ノート</strong> <span>Ver.1.0 試作1</span></p>
-            <p>不動産の買取案件に合う相談先を素早く探すための、ログイン不要・外部サーバー不要の業務用ノートです。</p>
+            <p><strong>買取業者ノート</strong> <span>Ver.1.0 試作2</span></p>
+            <p>買取案件、業者回答、相談履歴を端末内へまとめ、次に相談する業者を素早く判断するための業務用ノートです。</p>
             <p>データはこの端末のブラウザ内へ保存されます。Safariの履歴・Webサイトデータを削除すると消える可能性があるため、JSONバックアップを定期的に保存してください。</p>
             <a class="text-link" href="./README.md" target="_blank" rel="noopener">使い方（README）を開く</a>
           </div>
@@ -247,9 +319,9 @@
     </section>
   </main>
 
-  <button id="add-company-fab" type="button" class="fab" aria-label="新しい買取業者を登録" title="新しい買取業者を登録">
+  <button id="add-company-fab" type="button" class="fab" aria-label="新しく登録" title="新しく登録" data-fab-context="company">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-    <span>業者登録</span>
+    <span id="add-fab-label">業者登録</span>
   </button>
 
   <nav class="bottom-nav" aria-label="メインメニュー">
@@ -258,9 +330,13 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
         <span>探す</span>
       </button>
+      <button type="button" data-nav="cases">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10M9 3h6v3H9zM6 5h12v16H6zM9 10h6M9 14h6M9 18h4"/></svg>
+        <span>案件</span>
+      </button>
       <button type="button" data-nav="list">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V8l8-5 8 5v13M8 21v-6h8v6M9 10h.01M15 10h.01"/></svg>
-        <span>業者一覧</span>
+        <span>業者</span>
       </button>
       <button type="button" data-nav="other">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>
@@ -394,7 +470,7 @@
         <div id="restore-file-summary" class="restore-summary"></div>
         <fieldset class="restore-options">
           <legend>復元方法</legend>
-          <label><input type="radio" name="restoreMode" value="add" checked><span><strong>現在のデータへ追加</strong><small>同じIDは上書きせずスキップします</small></span></label>
+          <label><input type="radio" name="restoreMode" value="add" checked><span><strong>現在のデータへ追加</strong><small>IDが重なるデータは安全な新IDへ付け替えます</small></span></label>
           <label><input type="radio" name="restoreMode" value="replace"><span><strong>現在のデータを置換</strong><small>現在の登録と設定を入れ替えます</small></span></label>
         </fieldset>
         <p id="restore-error" class="form-message form-message--error" role="alert" hidden></p>
@@ -430,6 +506,365 @@
       <footer class="dialog-footer">
         <button type="button" class="button button--quiet" data-close-dialog="option-dialog">キャンセル</button>
         <button type="submit" class="button button--primary">候補を保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="case-dialog" class="app-dialog app-dialog--wide" aria-labelledby="case-dialog-title">
+    <form id="case-form" class="dialog-shell" novalidate>
+      <header class="dialog-header">
+        <div>
+          <p id="case-dialog-mode" class="eyebrow">NEW CASE</p>
+          <h2 id="case-dialog-title">案件を登録</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog="case-dialog" aria-label="案件登録画面を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <input id="case-id" name="id" type="hidden">
+        <input id="case-created-at" name="createdAt" type="hidden">
+        <div id="case-form-error" class="form-message form-message--error" role="alert" hidden></div>
+        <div id="case-form-warning" class="form-message form-message--warning" role="status" hidden></div>
+
+        <section class="form-section" aria-labelledby="case-basic-title">
+          <div class="form-section__heading">
+            <h3 id="case-basic-title">基本</h3>
+            <span>必須は案件名だけ</span>
+          </div>
+          <div class="form-grid">
+            <label class="field field--full" for="case-name">
+              <span>案件名 <em>必須</em></span>
+              <input id="case-name" name="caseName" type="text" maxlength="120" required aria-errormessage="case-form-error" placeholder="例：横浜市南区 古家付き土地">
+            </label>
+            <label class="field field--full" for="case-location">
+              <span>所在地 <small>任意</small></span>
+              <input id="case-location" name="location" type="text" maxlength="160" autocomplete="street-address" placeholder="例：横浜市南区○○町">
+            </label>
+            <label class="select-field" for="case-area">
+              <span>エリア</span>
+              <select id="case-area" name="area">
+                <option value="">未選択</option>
+              </select>
+            </label>
+            <label class="field" for="case-custom-area">
+              <span>エリア補足 <small>任意</small></span>
+              <input id="case-custom-area" name="customArea" type="text" maxlength="120" placeholder="例：横浜市南区中心">
+            </label>
+            <fieldset class="chip-fieldset field--full">
+              <legend>案件種別 <small>1つ選択</small></legend>
+              <div id="case-type" class="chip-group chip-group--single" role="group" aria-label="案件種別"></div>
+            </fieldset>
+            <label class="field" for="case-custom-type">
+              <span>種別補足 <small>その他の場合</small></span>
+              <input id="case-custom-type" name="customCaseType" type="text" maxlength="80" placeholder="例：倉庫付き住宅">
+            </label>
+            <label class="select-field field--full" for="case-status">
+              <span>進捗</span>
+              <select id="case-status" name="status">
+                <option value="相談中" selected>相談中</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <details class="form-disclosure case-more-fields">
+          <summary>個別要因・金額・面積・メモを追加</summary>
+          <div class="form-disclosure__body">
+        <section class="form-section" aria-labelledby="case-factor-title">
+          <div class="form-section__heading">
+            <h3 id="case-factor-title">案件要因</h3>
+            <span><output id="case-factor-count">0件選択</output>・複数選択可</span>
+          </div>
+          <p class="section-help">業者選びや類似案件の照合に使う特徴だけを選びます。</p>
+          <div id="case-factor-groups" class="factor-groups" role="group" aria-labelledby="case-factor-title"></div>
+        </section>
+
+        <section class="form-section" aria-labelledby="case-numbers-title">
+          <div class="form-section__heading">
+            <h3 id="case-numbers-title">価格・面積</h3>
+            <span>すべて任意</span>
+          </div>
+          <div class="form-grid form-grid--three">
+            <label class="field" for="asking-price">
+              <span>売主希望額</span>
+              <span class="input-with-unit">
+                <input id="asking-price" name="askingPrice" type="text" inputmode="numeric" maxlength="14" aria-describedby="asking-price-unit" placeholder="例：4800">
+                <span id="asking-price-unit">万円</span>
+              </span>
+            </label>
+            <label class="field" for="land-area">
+              <span>土地面積</span>
+              <span class="input-with-unit">
+                <input id="land-area" name="landArea" type="text" inputmode="decimal" maxlength="14" aria-describedby="land-area-unit" placeholder="例：120.5">
+                <span id="land-area-unit">㎡</span>
+              </span>
+            </label>
+            <label class="field" for="building-area">
+              <span>建物面積</span>
+              <span class="input-with-unit">
+                <input id="building-area" name="buildingArea" type="text" inputmode="decimal" maxlength="14" aria-describedby="building-area-unit" placeholder="例：88.2">
+                <span id="building-area-unit">㎡</span>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section" aria-labelledby="case-memo-title">
+          <div class="form-section__heading"><h3 id="case-memo-title">メモ</h3></div>
+          <label class="field field--full" for="case-memo">
+            <span>案件メモ <small><output id="case-memo-count">0</output>/500</small></span>
+            <textarea id="case-memo" name="memo" rows="5" maxlength="500" placeholder="例：現況古家あり。再建築可否を確認中。売主は早期回答希望。"></textarea>
+          </label>
+        </section>
+          </div>
+        </details>
+      </div>
+
+      <footer class="dialog-footer">
+        <button type="button" class="button button--quiet" data-close-dialog="case-dialog">キャンセル</button>
+        <button id="save-case" type="submit" class="button button--primary">案件を保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="case-detail-dialog" class="app-dialog app-dialog--wide" aria-labelledby="case-detail-dialog-title">
+    <div class="dialog-shell">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">CASE DETAIL</p>
+          <h2 id="case-detail-dialog-title">案件詳細</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog="case-detail-dialog" aria-label="案件詳細を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body case-detail-body">
+        <div id="case-detail-content"></div>
+        <section class="case-response-section" aria-labelledby="case-responses-title">
+          <div class="section-title-row section-title-row--actions">
+            <div>
+              <h3 id="case-responses-title">業者回答</h3>
+              <p id="case-response-count" aria-live="polite">0社</p>
+            </div>
+            <div class="inline-actions">
+              <button id="case-add-companies" type="button" class="button button--secondary">業者を追加</button>
+              <button id="case-find-similar" type="button" class="button button--quiet">類似案件</button>
+            </div>
+          </div>
+          <label class="select-field response-sort-field" for="response-sort">
+            <span>回答の並び順</span>
+            <select id="response-sort">
+              <option value="status">回答状況順</option>
+              <option value="amount">回答金額が高い順</option>
+              <option value="date">回答日が新しい順</option>
+              <option value="company">業者名順</option>
+            </select>
+          </label>
+          <div id="case-response-list" class="response-list"></div>
+        </section>
+      </div>
+      <footer id="case-detail-footer" class="dialog-footer dialog-footer--case-actions">
+        <button id="case-detail-edit" type="button" class="button button--secondary">編集</button>
+        <button id="case-detail-duplicate" type="button" class="button button--quiet">複製</button>
+        <button id="case-detail-delete" type="button" class="button button--danger">削除</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <dialog id="response-dialog" class="app-dialog app-dialog--small" aria-labelledby="response-dialog-title">
+    <form id="response-form" class="dialog-shell" novalidate>
+      <header class="dialog-header">
+        <div>
+          <p id="response-dialog-mode" class="eyebrow">COMPANY RESPONSE</p>
+          <h2 id="response-dialog-title">業者回答を入力</h2>
+        </div>
+        <button type="button" class="icon-button" data-close-dialog="response-dialog" aria-label="業者回答画面を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <input id="response-id" name="id" type="hidden">
+        <input id="response-case-id" name="caseId" type="hidden">
+        <input id="response-company-id" name="companyId" type="hidden">
+        <div id="response-form-error" class="form-message form-message--error" role="alert" hidden></div>
+
+        <section class="locked-company" aria-labelledby="response-company-heading">
+          <div>
+            <p id="response-company-heading">回答業者</p>
+            <strong id="response-company-name">業者を選択してください</strong>
+            <small id="response-company-contact"></small>
+          </div>
+          <span aria-hidden="true">固定</span>
+        </section>
+
+        <section class="form-section" aria-labelledby="response-main-title">
+          <div class="form-section__heading">
+            <h3 id="response-main-title">回答</h3>
+            <span>まず2項目だけ</span>
+          </div>
+          <div class="form-grid">
+            <label class="select-field field--full" for="response-status">
+              <span>回答状況</span>
+              <select id="response-status" name="responseStatus">
+                <option value="">未選択</option>
+              </select>
+            </label>
+            <label class="field field--full" for="response-amount">
+              <span>回答金額 <small>任意</small></span>
+              <span class="input-with-unit">
+                <input id="response-amount" name="responseAmount" type="text" inputmode="numeric" maxlength="14" aria-describedby="response-amount-unit" placeholder="例：4200">
+                <span id="response-amount-unit">万円</span>
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <details id="response-more-fields" class="form-disclosure">
+          <summary>日付・理由・要因などを追加</summary>
+          <div class="form-disclosure__body">
+            <div class="form-grid">
+              <label class="field" for="response-date">
+                <span>回答日</span>
+                <input id="response-date" name="responseDate" type="date">
+              </label>
+              <label class="select-field" for="response-reason">
+                <span>回答理由</span>
+                <select id="response-reason" name="responseReason">
+                  <option value="">未選択</option>
+                </select>
+              </label>
+              <label class="field field--full" for="response-follow-up-date">
+                <span>次回確認日 <small>任意</small></span>
+                <input id="response-follow-up-date" name="followUpDate" type="date">
+              </label>
+            </div>
+            <fieldset class="chip-fieldset response-factor-fieldset">
+              <legend>回答要因 <small>複数選択可</small></legend>
+              <div id="response-factor-chips" class="chip-group" role="group" aria-label="回答要因"></div>
+              <p id="response-factor-warning" class="help-text" role="status" hidden></p>
+            </fieldset>
+            <label class="field field--full" for="response-memo">
+              <span>回答メモ <small><output id="response-memo-count">0</output>/500</small></span>
+              <textarea id="response-memo" name="memo" rows="5" maxlength="500" placeholder="例：社内決裁後に再回答予定。価格以外の条件は相談可。"></textarea>
+            </label>
+          </div>
+        </details>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="button button--quiet" data-close-dialog="response-dialog">キャンセル</button>
+        <button id="save-response" type="submit" class="button button--primary">回答を保存</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="quick-company-dialog" class="app-dialog app-dialog--small" aria-labelledby="quick-company-dialog-title">
+    <form id="quick-company-form" class="dialog-shell" novalidate>
+      <header class="dialog-header">
+        <div><p class="eyebrow">ADD COMPANIES</p><h2 id="quick-company-dialog-title">業者を追加</h2></div>
+        <button type="button" class="icon-button" data-close-dialog="quick-company-dialog" aria-label="業者追加画面を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <input id="quick-company-case-id" name="caseId" type="hidden">
+        <div id="quick-company-error" class="form-message form-message--error" role="alert" hidden></div>
+        <label class="visually-hidden" for="quick-company-query">追加する業者を検索</label>
+        <div class="search-input-wrap">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+          <input id="quick-company-query" type="search" inputmode="search" autocomplete="off" placeholder="業者名・担当者を検索">
+        </div>
+        <div class="selection-summary">
+          <p>追加する業者を複数選べます。</p>
+          <strong id="quick-company-selected-count" aria-live="polite">0社選択</strong>
+        </div>
+        <div id="quick-company-list" class="selectable-company-list" role="group" aria-label="追加する業者"></div>
+      </div>
+      <footer class="dialog-footer">
+        <button type="button" class="button button--quiet" data-close-dialog="quick-company-dialog">キャンセル</button>
+        <button id="add-selected-companies" type="submit" class="button button--primary">選択した業者を追加</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="similar-cases-dialog" class="app-dialog app-dialog--wide" aria-labelledby="similar-cases-dialog-title">
+    <form id="similar-cases-form" class="dialog-shell">
+      <header class="dialog-header">
+        <div><p class="eyebrow">SIMILAR CASES</p><h2 id="similar-cases-dialog-title">類似案件</h2></div>
+        <button type="button" class="icon-button" data-close-dialog="similar-cases-dialog" aria-label="類似案件を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <input id="similar-source-case-id" name="sourceCaseId" type="hidden">
+        <div class="similar-source-card">
+          <span>比較元</span>
+          <strong id="similar-source-case-name">案件を選択してください</strong>
+          <p id="similar-source-case-conditions"></p>
+        </div>
+        <div class="result-header result-header--dialog">
+          <div>
+            <h3>近い条件の案件</h3>
+            <p id="similar-cases-summary" aria-live="polite">物件種別・案件要因・エリアから照合します。</p>
+          </div>
+        </div>
+        <div id="similar-cases-list" class="case-list case-list--compact"></div>
+      </div>
+      <footer class="dialog-footer dialog-footer--single">
+        <button type="button" class="button button--primary" data-close-dialog="similar-cases-dialog">閉じる</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="advanced-settings-dialog" class="app-dialog app-dialog--wide" aria-labelledby="advanced-settings-dialog-title">
+    <form id="advanced-settings-form" class="dialog-shell">
+      <header class="dialog-header">
+        <div><p class="eyebrow">ADVANCED SETTINGS</p><h2 id="advanced-settings-dialog-title">詳細設定</h2></div>
+        <button type="button" class="icon-button" data-close-dialog="advanced-settings-dialog" aria-label="詳細設定を閉じる" title="閉じる">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <div id="advanced-settings-content" class="advanced-settings-content">
+        <section class="form-section" aria-labelledby="archive-settings-title">
+          <div class="form-section__heading">
+            <h3 id="archive-settings-title">アーカイブ済み業者</h3>
+            <span id="archived-company-count" aria-live="polite">0社</span>
+          </div>
+          <p class="section-help">利用を休止した業者を一覧から戻せます。案件へ保存済みの回答履歴は残ります。</p>
+          <label class="visually-hidden" for="archived-company-query">アーカイブ済み業者を検索</label>
+          <div class="search-input-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="archived-company-query" type="search" inputmode="search" autocomplete="off" placeholder="アーカイブ済み業者を検索">
+          </div>
+          <div id="archived-company-list" class="archive-list"></div>
+        </section>
+
+        <section class="form-section" aria-labelledby="fixed-options-title">
+          <div class="form-section__heading">
+            <h3 id="fixed-options-title">案件・回答の固定候補</h3>
+            <span>試作2</span>
+          </div>
+          <p class="section-help">案件種別、案件要因、進捗、回答状況、回答理由はデータの互換性を守るため固定しています。</p>
+          <dl id="advanced-settings-fixed-options" class="settings-definition-list">
+            <div><dt>案件種別</dt><dd id="fixed-case-type-count">10件</dd></div>
+            <div><dt>案件要因</dt><dd id="fixed-case-factor-count">17件</dd></div>
+            <div><dt>案件進捗</dt><dd id="fixed-case-status-count">6件</dd></div>
+            <div><dt>回答状況</dt><dd id="fixed-response-status-count">6件</dd></div>
+          </dl>
+          <div id="fixed-option-review" class="fixed-option-review"></div>
+        </section>
+
+        <section class="form-section" aria-labelledby="company-options-link-title">
+          <div class="form-section__heading"><h3 id="company-options-link-title">業者の検索候補</h3></div>
+          <p class="section-help">業者へ設定するエリアと買取対象は、従来の候補編集画面で変更できます。</p>
+          <button id="open-option-settings-from-advanced" type="button" class="button button--secondary button--full">エリア・買取対象候補を編集</button>
+        </section>
+        </div>
+      </div>
+      <footer class="dialog-footer dialog-footer--single">
+        <button type="button" class="button button--primary" data-close-dialog="advanced-settings-dialog">閉じる</button>
       </footer>
     </form>
   </dialog>

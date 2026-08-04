@@ -558,6 +558,8 @@ async function runPwa(browser) {
     await page.evaluate(async () => {
       await KCN.db.clearAllData();
       await KCN.db.putCompany(KCN.normalizeCompany({ id: "offline-company", companyName: "オフライン業者", areas: ["横浜"], propertyTypes: ["土地"], temperature: "積極的" }));
+      await KCN.db.putCase(KCN.normalizeCase({ id: "offline-case", caseName: "オフライン案件", area: "横浜", caseType: "land" }));
+      await KCN.db.putCaseResponse(KCN.normalizeCaseResponse({ id: "offline-response", caseId: "offline-case", companyId: "offline-company", responseStatus: "回答待ち" }));
       await KCN.app.reloadData();
     });
     await page.reload({ waitUntil: "networkidle" });
@@ -566,6 +568,8 @@ async function runPwa(browser) {
     await page.reload({ waitUntil: "domcontentloaded" });
     await waitForApp(page);
     assert.equal(await page.evaluate(() => KCN.app.state.companies.some((c) => c.id === "offline-company")), true);
+    assert.equal(await page.evaluate(() => KCN.caseUI.getState().cases.some((c) => c.id === "offline-case")), true);
+    assert.equal(await page.evaluate(() => KCN.caseUI.getState().responses.some((r) => r.id === "offline-response")), true);
     assert.notEqual(await page.locator(".bottom-nav").evaluate((element) => getComputedStyle(element).backgroundColor), "rgba(0, 0, 0, 0)");
     await context.setOffline(false);
   });
@@ -573,6 +577,7 @@ async function runPwa(browser) {
   await check("旧アプリキャッシュだけ削除し無関係キャッシュを保持", async () => {
     await page.evaluate(async () => {
       await caches.open("kaitori-company-note-v0-test");
+      await caches.open("kaitori-company-note-v1-prototype1");
       await caches.open("unrelated-app-cache");
       const registrations = await navigator.serviceWorker.getRegistrations();
       await Promise.all(registrations.map((registration) => registration.unregister()));
@@ -582,10 +587,11 @@ async function runPwa(browser) {
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.waitForFunction(async () => {
       const names = await caches.keys();
-      return names.includes("kaitori-company-note-v1-prototype1") && !names.includes("kaitori-company-note-v0-test");
+      return names.includes("kaitori-company-note-v1-prototype2") && !names.includes("kaitori-company-note-v1-prototype1") && !names.includes("kaitori-company-note-v0-test");
     });
     const names = await page.evaluate(() => caches.keys());
-    assert.ok(names.includes("kaitori-company-note-v1-prototype1"));
+    assert.ok(names.includes("kaitori-company-note-v1-prototype2"));
+    assert.equal(names.includes("kaitori-company-note-v1-prototype1"), false);
     assert.equal(names.includes("kaitori-company-note-v0-test"), false);
     assert.equal(names.includes("unrelated-app-cache"), true);
   });

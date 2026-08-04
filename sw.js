@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "kaitori-company-note-v1-prototype1";
+const CACHE_NAME = "kaitori-company-note-v1-prototype2";
 const CACHE_PREFIX = "kaitori-company-note-";
 const APP_SHELL = [
   "./",
@@ -9,6 +9,7 @@ const APP_SHELL = [
   "./js/constants.js",
   "./js/utils.js",
   "./js/db.js",
+  "./js/cases-ui.js",
   "./js/app.js",
   "./manifest.webmanifest",
   "./apple-touch-icon.png",

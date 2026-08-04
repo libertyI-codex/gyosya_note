@@ -53,7 +53,7 @@
       "search-area-chips", "search-property-chips", "search-temperature", "search-favorite-only", "search-query",
       "clear-search", "search-results", "search-result-count", "company-list", "list-query", "list-sort",
       "list-favorite-only", "list-temperature", "list-area", "list-property-type", "clear-list-filters",
-      "list-active-filter-count", "list-count-badge", "list-summary", "add-company-fab",
+      "list-active-filter-count", "list-count-badge", "list-summary", "add-company-fab", "add-fab-label",
       "stat-total", "stat-favorite", "stat-active", "stat-paused", "storage-mode-label",
       "export-json", "choose-restore-file", "restore-file-input", "export-csv", "open-option-settings",
       "delete-samples", "delete-all-data", "company-dialog", "company-form", "company-dialog-mode",
@@ -127,6 +127,10 @@
       const confirmed = global.confirm("入力中の内容を破棄して閉じますか？");
       if (!confirmed) return false;
     }
+    if (!opts.force && KCN.caseUI && KCN.caseUI.isInitialized()) {
+      const message = KCN.caseUI.shouldConfirmClose(dialog);
+      if (message && !global.confirm(message)) return false;
+    }
     if (opts.force && dialog === dom["company-dialog"]) state.form.dirty = false;
     dialog.close();
     return true;
@@ -145,13 +149,17 @@
     }
     const previous = state.lastFocus.get(dialog.id);
     state.lastFocus.delete(dialog.id);
-    if (previous && document.contains(previous) && typeof previous.focus === "function") {
+    const containingDialog = previous && typeof previous.closest === "function" ? previous.closest("dialog") : null;
+    if (previous && document.contains(previous) && (!containingDialog || containingDialog.open) && typeof previous.focus === "function") {
       requestAnimationFrame(() => previous.focus({ preventScroll: true }));
+    } else {
+      const activeNav = document.querySelector('[data-nav][aria-current="page"]');
+      if (activeNav) requestAnimationFrame(() => activeNav.focus({ preventScroll: true }));
     }
   }
 
   function switchScreen(name) {
-    if (!['search', 'list', 'other'].includes(name)) return;
+    if (!['search', 'cases', 'list', 'other'].includes(name)) return;
     state.currentScreen = name;
     document.querySelectorAll(".screen[data-screen]").forEach((section) => {
       const active = section.dataset.screen === name;
@@ -165,6 +173,11 @@
       else button.removeAttribute("aria-current");
     });
     dom["add-company-fab"].hidden = name === "other";
+    const fabLabel = name === "cases" ? "新しい案件を登録" : "新しい業者を登録";
+    dom["add-company-fab"].setAttribute("aria-label", fabLabel);
+    dom["add-company-fab"].setAttribute("title", fabLabel);
+    if (dom["add-fab-label"]) dom["add-fab-label"].textContent = name === "cases" ? "案件登録" : "業者登録";
+    if (name === "cases" && KCN.caseUI) KCN.caseUI.renderAll();
     if (name === "list") renderCompanyList();
     if (name === "other") renderStats();
     global.scrollTo({ top: 0, behavior: "auto" });
@@ -283,6 +296,7 @@
       query: state.search.query
     };
     return state.companies
+      .filter((company) => !company.isArchived)
       .filter((company) => KCN.matchesCompany(company, filters))
       .sort((a, b) => KCN.compareCompanies(a, b, "search"));
   }
@@ -300,7 +314,7 @@
 
   function getListResults() {
     const query = KCN.normalizeText(state.list.query);
-    return state.companies.filter((company) => {
+    return state.companies.filter((company) => !company.isArchived).filter((company) => {
       if (query && !KCN.normalizeText(company.companyName).includes(query)) return false;
       return KCN.matchesCompany(company, {
         areas: state.list.area ? [state.list.area] : [],
@@ -318,22 +332,24 @@
       + Number(state.list.temperature !== "すべて") + Number(Boolean(state.list.area)) + Number(Boolean(state.list.propertyType));
     dom["list-active-filter-count"].textContent = filterCount ? `（${filterCount}件）` : "";
     dom["list-count-badge"].textContent = `${results.length}社`;
-    dom["list-summary"].textContent = state.companies.length === results.length
-      ? `登録済み ${state.companies.length}社を表示しています。`
-      : `登録済み ${state.companies.length}社のうち ${results.length}社を表示しています。`;
+    const activeCompanies = state.companies.filter((company) => !company.isArchived);
+    dom["list-summary"].textContent = activeCompanies.length === results.length
+      ? `登録済み ${activeCompanies.length}社を表示しています。`
+      : `登録済み ${activeCompanies.length}社のうち ${results.length}社を表示しています。`;
     dom["company-list"].setAttribute("aria-busy", "false");
     if (!results.length) {
-      dom["company-list"].innerHTML = emptyStateHtml("表示できる業者がありません", state.companies.length ? "絞り込み条件を解除して確認してください。" : "右下の＋ボタンから最初の業者を登録できます。", state.companies.length ? { id: "clear-list", label: "絞り込みを解除" } : { id: "add-company", label: "業者を登録" });
+      dom["company-list"].innerHTML = emptyStateHtml("表示できる業者がありません", activeCompanies.length ? "絞り込み条件を解除して確認してください。" : "右下の＋ボタンから最初の業者を登録できます。", activeCompanies.length ? { id: "clear-list", label: "絞り込みを解除" } : { id: "add-company", label: "業者を登録" });
       return;
     }
     dom["company-list"].innerHTML = results.map((company) => companyCardHtml(company, "list")).join("");
   }
 
   function renderStats() {
-    dom["stat-total"].textContent = state.companies.length;
-    dom["stat-favorite"].textContent = state.companies.filter((company) => company.isFavorite).length;
-    dom["stat-active"].textContent = state.companies.filter((company) => company.temperature === KCN.TEMPERATURES.ACTIVE).length;
-    dom["stat-paused"].textContent = state.companies.filter((company) => company.temperature === KCN.TEMPERATURES.PAUSED).length;
+    const activeCompanies = state.companies.filter((company) => !company.isArchived);
+    dom["stat-total"].textContent = activeCompanies.length;
+    dom["stat-favorite"].textContent = activeCompanies.filter((company) => company.isFavorite).length;
+    dom["stat-active"].textContent = activeCompanies.filter((company) => company.temperature === KCN.TEMPERATURES.ACTIVE).length;
+    dom["stat-paused"].textContent = activeCompanies.filter((company) => company.temperature === KCN.TEMPERATURES.PAUSED).length;
     dom["storage-mode-label"].textContent = KCN.db.getStorageMode() === "indexeddb" ? "IndexedDB・端末内保存" : "端末内保存（互換モード）";
   }
 
@@ -342,6 +358,7 @@
     renderSearchResults();
     renderCompanyList();
     renderStats();
+    if (KCN.caseUI && KCN.caseUI.isInitialized()) KCN.caseUI.renderAll();
     ensureButtonLabels(document);
   }
 
@@ -352,6 +369,7 @@
       const [companies, settings] = await Promise.all([KCN.db.getAllCompanies(), KCN.db.getSettings()]);
       state.companies = companies;
       state.settings = settings;
+      if (KCN.caseUI && KCN.caseUI.isInitialized()) await KCN.caseUI.reload();
       renderEverything();
     } finally {
       if (opts.showLoading) setLoading(false);
@@ -478,6 +496,8 @@
       createdAt: dom["company-created-at"].value || now,
       updatedAt: now,
       isSample: state.form.mode === "edit" && existing ? existing.isSample : false,
+      isArchived: state.form.mode === "edit" && existing ? existing.isArchived : false,
+      archivedAt: state.form.mode === "edit" && existing ? existing.archivedAt : null,
       schemaVersion: KCN.APP.schemaVersion,
       extra: state.form.mode === "edit" && existing ? existing.extra : {}
     });
@@ -628,6 +648,7 @@
           <div class="card-status-row">
             <span class="temperature-badge temperature-badge--${selectedTemperatureClass(company.temperature)}">${KCN.escapeHtml(company.temperature)}</span>
             ${company.isSample ? '<span class="sample-badge">サンプル</span>' : ""}
+            ${company.isArchived ? '<span class="sample-badge">アーカイブ</span>' : ""}
           </div>
         </div>
         <button type="button" class="favorite-button" data-favorite-id="${KCN.escapeHtml(company.id)}" aria-label="${KCN.escapeHtml(favoriteLabel)}" aria-pressed="${company.isFavorite}" title="${KCN.escapeHtml(favoriteLabel)}">${company.isFavorite ? "★" : "☆"}</button>
@@ -663,10 +684,13 @@
           <div><dt>登録日</dt><dd>${KCN.escapeHtml(KCN.formatDate(company.createdAt))}</dd></div>
           <div><dt>更新日</dt><dd>${KCN.escapeHtml(KCN.formatDate(company.updatedAt))}</dd></div>
         </dl>
-      </section>`;
+      </section>
+      ${(KCN.caseUI && KCN.caseUI.isInitialized()) ? KCN.caseUI.companyHistoryHtml(company.id) : ""}`;
     dom["detail-footer"].classList.toggle("dialog-footer--single", state.reopenFormAfterDetail);
     dom["detail-footer"].innerHTML = state.reopenFormAfterDetail
       ? '<button type="button" class="button button--primary" data-detail-action="return-to-form">登録画面へ戻る</button>'
+      : company.isArchived
+        ? `<button type="button" class="button button--primary" data-detail-action="restore" data-company-id="${KCN.escapeHtml(company.id)}">業者一覧へ復元</button>`
       : `
         <button type="button" class="button button--secondary" data-detail-action="edit" data-company-id="${KCN.escapeHtml(company.id)}">編集</button>
         <button type="button" class="button button--quiet" data-detail-action="duplicate" data-company-id="${KCN.escapeHtml(company.id)}">複製</button>
@@ -687,6 +711,22 @@
   async function deleteCompany(id) {
     const company = state.companies.find((item) => item.id === id);
     if (!company) return;
+    const responseCount = KCN.caseUI && KCN.caseUI.isInitialized() ? KCN.caseUI.companyResponseCount(id) : 0;
+    if (responseCount) {
+      if (!global.confirm(`「${company.companyName}」には${responseCount}件の回答履歴があります。\n過去回答を残したまま通常の一覧から非表示にしますか？`)) return;
+      setLoading(true, "アーカイブしています");
+      try {
+        await KCN.db.putCompany(KCN.normalizeCompany({ ...company, isArchived: true, archivedAt: KCN.isoNow(), updatedAt: KCN.isoNow() }));
+        closeDialog(dom["detail-dialog"], { force: true });
+        await reloadData();
+        showToast(`「${company.companyName}」を非表示にしました。詳細設定から復元できます。`, { duration: 7000 });
+      } catch (error) {
+        showToast("業者を非表示にできませんでした。");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (!global.confirm(`「${company.companyName}」を削除しますか？`)) return;
     setLoading(true, "削除しています");
     try {
@@ -748,7 +788,7 @@
 
   function exportCsv() {
     try {
-      const sorted = [...state.companies].sort((a, b) => KCN.compareCompanies(a, b, "name"));
+      const sorted = state.companies.filter((company) => !company.isArchived).sort((a, b) => KCN.compareCompanies(a, b, "name"));
       const blob = new Blob([KCN.buildCsv(sorted)], { type: "text/csv;charset=utf-8" });
       KCN.downloadBlob(blob, `kaitori-company-note-${KCN.todayFileStamp()}.csv`);
       showToast("CSVを出力しました。");
@@ -775,7 +815,7 @@
       const strong = document.createElement("strong");
       strong.textContent = file.name;
       const copy = document.createElement("span");
-      copy.textContent = `${validated.companies.length}社の業者データを確認しました。`;
+      copy.textContent = `${validated.companies.length}社・${validated.cases.length}案件・${validated.caseResponses.length}回答を確認しました。`;
       dom["restore-file-summary"].append(strong, copy);
       dom["restore-error"].hidden = true;
       openDialog(dom["restore-dialog"]);
@@ -815,8 +855,10 @@
     closeDialog(dom["restore-dialog"], { force: true });
     try {
       await reloadData();
-      const skipped = result.skipped ? `（同じID ${result.skipped}件はスキップ）` : "";
-      showToast(`${result.imported}社を復元しました。${skipped}`, { duration: 6500 });
+      const companyCount = result.importedCompanies ?? result.imported ?? 0;
+      const caseCount = result.importedCases ?? 0;
+      const responseCount = result.importedResponses ?? 0;
+      showToast(`${companyCount}社・${caseCount}案件・${responseCount}回答を復元しました。`, { duration: 6500 });
     } catch (error) {
       showToast("復元は完了しましたが、画面を更新できませんでした。ページを再読み込みしてください。", { duration: 8000 });
     } finally {
@@ -878,7 +920,7 @@
   }
 
   async function removeAllData() {
-    if (!global.confirm("全業者データと候補設定を削除しますか？この操作は取り消せません。")) return;
+    if (!global.confirm("全業者・案件・回答データと候補設定を削除しますか？この操作は取り消せません。")) return;
     if (!global.confirm("本当に全データを削除しますか？")) return;
     setLoading(true, "全データを削除中");
     try {
@@ -936,7 +978,10 @@
 
   function bindEvents() {
     document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => switchScreen(button.dataset.nav)));
-    dom["add-company-fab"].addEventListener("click", openNewCompany);
+    dom["add-company-fab"].addEventListener("click", () => {
+      if (state.currentScreen === "cases" && KCN.caseUI) KCN.caseUI.openNewCase();
+      else openNewCompany();
+    });
     dom["clear-search"].addEventListener("click", clearSearchFilters);
     dom["clear-list-filters"].addEventListener("click", clearListFilters);
 
@@ -1008,6 +1053,7 @@
     dom["delete-samples"].addEventListener("click", removeSamples);
     dom["delete-all-data"].addEventListener("click", removeAllData);
     dom["toast-close"].addEventListener("click", hideToast);
+    dom["loading-overlay"].addEventListener("cancel", (event) => event.preventDefault());
 
     document.addEventListener("click", async (event) => {
       const chip = event.target.closest("[data-chip-scope]");
@@ -1070,6 +1116,19 @@
           closeDialog(dom["detail-dialog"], { force: true });
           fillCompanyForm(company, "duplicate");
         }
+        if (detailAction.dataset.detailAction === "restore") {
+          setLoading(true, "業者を復元中");
+          try {
+            await KCN.db.putCompany(KCN.normalizeCompany({ ...company, isArchived: false, archivedAt: null, updatedAt: KCN.isoNow() }));
+            closeDialog(dom["detail-dialog"], { force: true });
+            await reloadData();
+            showToast(`「${company.companyName}」を業者一覧へ復元しました。`);
+          } catch (error) {
+            showToast("業者を復元できませんでした。");
+          } finally {
+            setLoading(false);
+          }
+        }
         if (detailAction.dataset.detailAction === "delete") await deleteCompany(company.id);
         return;
       }
@@ -1101,7 +1160,9 @@
     global.addEventListener("online", updateConnectionStatus);
     global.addEventListener("offline", updateConnectionStatus);
     global.addEventListener("beforeunload", (event) => {
-      if (!state.form.dirty || (!dom["company-dialog"].open && !state.reopenFormAfterDetail)) return;
+      const companyDirty = state.form.dirty && (dom["company-dialog"].open || state.reopenFormAfterDetail);
+      const caseDirty = KCN.caseUI && KCN.caseUI.hasUnsavedChanges();
+      if (!companyDirty && !caseDirty) return;
       event.preventDefault();
       event.returnValue = "";
     });
@@ -1116,6 +1177,7 @@
     try {
       state.settings = await KCN.db.initialize();
       state.companies = await KCN.db.getAllCompanies();
+      if (KCN.caseUI) await KCN.caseUI.initialize();
       state.list.sort = state.settings.defaultSort || "name";
       dom["list-sort"].value = state.list.sort;
       renderEverything();
@@ -1138,7 +1200,17 @@
     openDetail,
     switchScreen,
     getSearchResults,
-    getListResults
+    getListResults,
+    showToast,
+    setLoading,
+    openDialog,
+    closeDialog,
+    restoreDialogFocus,
+    ensureButtonLabels,
+    renderDetail,
+    renderEverything,
+    getDom: () => dom,
+    getState: () => state
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize, { once: true });

@@ -1,63 +1,59 @@
-# 実装概要
+# 実装概要 — Ver.1.0 試作2
 
 ## アプリ構成
 
-- `index.html` — 探す／業者一覧／その他、登録編集・詳細・復元・候補編集ダイアログ
-- `css/styles.css` — Liberty Codex系デザイン、390px優先、PC 2〜3列、safe area
-- `js/constants.js` — 初期候補、温度感、アプリ定数、サンプル3社
-- `js/utils.js` — 正規化、検索、並び替え、重複検知、バックアップ検証、CSV
-- `js/db.js` — IndexedDB version 1、CRUD、初期化、原子的復元
-- `js/app.js` — UI状態、描画、イベント、PWA登録
-- `manifest.webmanifest` — PWAメタデータ
-- `sw.js` — アプリシェル、オフライン、限定的な旧キャッシュ削除
-- `icons/icon-source.svg` — 共通シリーズ準拠の1024px原本
-- `apple-touch-icon.png`／`icon-192.png`／`icon-512.png`／`icon-maskable-512.png`
-- `README.md` — 利用者向け手順と制限
-- `tests/` — 静的、単体、実ブラウザQAと証跡
+- `index.html` — 探す／案件／業者／その他と各モーダル
+- `css/styles.css` — 390px優先、44pxタップ領域、safe area、固定ヘッダー／フッター付きダイアログ
+- `js/constants.js` — アプリ版、業者候補、案件種別、個別要因、案件・回答状況
+- `js/utils.js` — 正規化、検索、並び替え、類似判定、履歴集計、バックアップ検証、2種類のCSV
+- `js/db.js` — IndexedDB v2、4ストア、原子的CRUD／移行／復元
+- `js/cases-ui.js` — 案件、回答、業者候補、類似案件、履歴、アーカイブUI
+- `js/app.js` — 既存業者UI、4ナビ、バックアップ、PWA登録、共通ダイアログ制御
+- `manifest.webmanifest` / `sw.js` — PWAとオフラインアプリシェル
+- `icons/` とPNG 4点 — 既存仕事用シリーズの中央文字「買」
+- `tests/` — 静的・純粋関数・移行・バックアップ・性能・実ブラウザQA
 
 ## 画面
 
 1. 探す
-2. 業者一覧
-3. その他
-4. 業者登録・編集（モーダル）
-5. 業者詳細（モーダル）
-6. JSON復元（モーダル）
-7. 候補編集（モーダル）
+2. 案件
+3. 業者
+4. その他
+5. 業者登録／詳細
+6. 案件登録／詳細
+7. 回答編集、業者複数追加、類似案件
+8. JSON復元、候補編集、詳細設定／アーカイブ
 
-## データ
+## IndexedDB v2
 
-IndexedDB名：`kaitori-company-note`、version：`1`
+DB名は `kaitori-company-note`、versionは `2` です。
 
 - `companies`（keyPath `id`）
-- `settings`（keyPath `id`、`app-settings` 1レコード）
+- `settings`（keyPath `id`）
+- `cases`（keyPath `id`、`updatedAt` / `createdAt` / `status` / `area` / `caseType` 等）
+- `caseResponses`（keyPath `id`、`caseId` / `companyId` / `responseStatus` / `followUpDate` 等）
+- `caseResponses.caseCompany` は `[caseId, companyId]` の複合ユニークインデックス
 
-通常はIndexedDBを使用します。IndexedDBを開けない環境だけ、同一ブラウザ内のローカル互換保存へ切り替えます。
+v1からのupgradeでは新ストアとインデックスだけを追加し、既存の `companies` と `settings` の生レコードへ書き込みません。`isArchived`等は読み込み時の正規化で安全に補完します。
 
-## 検索
+## 検索とスコアリング
 
-- 分類間：AND
-- 同じ分類内の複数選択：OR
-- フリーワード内の空白区切り語：AND
-- エリア：個別地域に対して神奈川県全域・関東・全国等の広域包含あり
-- 物件種別：タグ一致
-- 電話：記号を除いた数字でも検索
-- 探す画面の順：お気に入り→温度感→日本語業者名→ID
+- 業者検索：分類間AND、同分類内OR、広域エリア包含、電話記号除去
+- 案件検索：進捗、エリア、案件種別、個別要因、案件・回答・業者横断フリーワード
+- 類似案件：案件種別一致→共通要因数→エリア一致→更新日の辞書式優先
+- おすすめ業者：エリア一致、買取対象対応、お気に入り、温度感、同じ要因への過去回答件数を加点
 
-## 復元安全性
+## 整合性と復元安全性
 
-全件をメモリ上で検証してから保存処理へ進みます。置換は`companies`と`settings`の同一readwriteトランザクションで行います。追加時の既存IDは上書きせずスキップします。検証またはトランザクション失敗時は既存データを変更しません。
+- 案件削除と紐づく回答削除は同一トランザクション
+- 回答一括追加は同一トランザクション
+- 回答変更時に案件の更新日も同一トランザクションで更新
+- 回答履歴がある業者は通常削除せずアーカイブ
+- schemaVersion 1と2を復元可能
+- 追加復元のID衝突は再採番し、回答参照も更新
+- 置換復元は4ストアと設定を同一トランザクションで処理
+- 全件検証またはトランザクション失敗時は既存データを変更しない
 
-## デザインとアイコン
+## PWAとデザイン
 
-既存のLiberty Codexシリーズ仕様を使用しています。
-
-- 濃紺 `#0F1B2D`
-- アイボリー `#FFF8E7`
-- 金 `#E2C77F`
-- 本アプリの赤錆アクセント `#A6533F`
-- 左上の共通蝶紋
-- 八角形プレート
-- 中央文字「買」
-
-SVGをローカルのEdge描画でPNG化し、外部画像生成AI・外部Webサービスは使用していません。
+Service Workerキャッシュ名は `kaitori-company-note-v1-prototype2` です。activate時は `kaitori-company-note-` 接頭辞の旧キャッシュだけを削除し、他アプリのキャッシュは残します。色は濃紺・アイボリー・落ち着いたグレー・控えめな赤錆アクセントを使用し、アイコンは外部サービスを使わず既存SVG体系からローカル生成しています。

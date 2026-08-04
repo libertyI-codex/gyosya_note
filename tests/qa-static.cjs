@@ -37,14 +37,14 @@ function pngInfo(relative) {
 
 test("必須ファイルがすべて存在", () => {
   for (const relative of [
-    "index.html", "css/styles.css", "js/constants.js", "js/utils.js", "js/db.js", "js/app.js",
+    "index.html", "css/styles.css", "js/constants.js", "js/utils.js", "js/db.js", "js/cases-ui.js", "js/app.js",
     "manifest.webmanifest", "sw.js", "apple-touch-icon.png", "icon-192.png", "icon-512.png",
     "icon-maskable-512.png", "icons/icon-source.svg", "README.md"
   ]) assert.equal(fs.existsSync(path.join(root, relative)), true, relative);
 });
 
 test("全JavaScriptの構文が正しい", () => {
-  for (const relative of ["js/constants.js", "js/utils.js", "js/db.js", "js/app.js", "sw.js"]) {
+  for (const relative of ["js/constants.js", "js/utils.js", "js/db.js", "js/cases-ui.js", "js/app.js", "sw.js"]) {
     execFileSync(node, ["--check", path.join(root, relative)], { stdio: "pipe" });
   }
 });
@@ -52,13 +52,13 @@ test("全JavaScriptの構文が正しい", () => {
 test("file対応のclassic defer scriptsと相対パス", () => {
   const html = read("index.html");
   assert.equal(/<script[^>]+type=["']module/i.test(html), false);
-  assert.equal((html.match(/<script defer src="\.\/js\//g) || []).length, 4);
+  assert.equal((html.match(/<script defer src="\.\/js\//g) || []).length, 5);
   assert.equal(/(?:src|href)="\/(?!\/)/.test(html), false);
   assert.ok(html.includes('rel="apple-touch-icon"'));
 });
 
 test("外部CDN・外部API参照がない", () => {
-  const appFiles = ["index.html", "css/styles.css", "js/constants.js", "js/utils.js", "js/db.js", "js/app.js", "manifest.webmanifest", "sw.js"];
+  const appFiles = ["index.html", "css/styles.css", "js/constants.js", "js/utils.js", "js/db.js", "js/cases-ui.js", "js/app.js", "manifest.webmanifest", "sw.js"];
   for (const relative of appFiles) {
     const content = read(relative);
     assert.equal(/https?:\/\//i.test(content), false, relative);
@@ -94,19 +94,21 @@ test("PNG寸法と完全不透明形式", () => {
 
 test("Service Workerのキャッシュ名・安全な旧版削除・外部URL除外", () => {
   const sw = read("sw.js");
-  assert.ok(sw.includes('"kaitori-company-note-v1-prototype1"'));
+  assert.ok(sw.includes('"kaitori-company-note-v1-prototype2"'));
   assert.ok(sw.includes('name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME'));
   assert.ok(sw.includes("url.origin !== self.location.origin"));
   assert.ok(sw.includes("request.method !== \"GET\""));
   assert.ok(sw.includes("['http:', 'https:'].includes(url.protocol)"));
 });
 
-test("IndexedDB version 1とcompanies/settingsストア", () => {
+test("IndexedDB version 2と4ストア", () => {
   const constants = read("js/constants.js");
   const db = read("js/db.js");
-  assert.ok(constants.includes("dbVersion: 1"));
+  assert.ok(constants.includes("dbVersion: 2"));
   assert.ok(constants.includes('companyStore: "companies"'));
   assert.ok(constants.includes('settingsStore: "settings"'));
+  assert.ok(constants.includes('caseStore: "cases"'));
+  assert.ok(constants.includes('responseStore: "caseResponses"'));
   assert.ok(db.includes("indexedDB.open(KCN.APP.dbName, KCN.APP.dbVersion)"));
 });
 
