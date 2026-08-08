@@ -10,6 +10,50 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function normalizeSettings(rawSettings, options) {
+    const source = rawSettings && typeof rawSettings === "object" && !Array.isArray(rawSettings) ? rawSettings : {};
+    const opts = options || {};
+    const normalizedAreas = KCN.normalizeAreaValues(source.areaOptions || []);
+    const legacyPropertyTypeOptions = KCN.uniqueStrings([
+      ...(Array.isArray(source.legacyPropertyTypeOptions) ? source.legacyPropertyTypeOptions : []),
+      ...(Array.isArray(source.propertyTypeOptions)
+        ? source.propertyTypeOptions.filter((value) => !KCN.PURCHASE_TARGET_IDS.includes(value))
+        : [])
+    ]);
+    const allowedSorts = ["name", "favorite", "updated", "created"];
+    const defaultSort = source.defaultSort === "temperature" || !allowedSorts.includes(source.defaultSort)
+      ? "name"
+      : source.defaultSort;
+    return {
+      ...KCN.DEFAULT_SETTINGS,
+      ...source,
+      id: KCN.APP.settingsId,
+      areaOptions: KCN.uniqueStrings([...KCN.AREA_IDS, ...normalizedAreas]),
+      propertyTypeOptions: [...KCN.PURCHASE_TARGET_IDS],
+      legacyPropertyTypeOptions,
+      defaultSort,
+      schemaVersion: KCN.APP.schemaVersion,
+      companyDataModelVersion: 3,
+      sampleInitialized: opts.sampleInitialized === true ? true : source.sampleInitialized === true,
+      updatedAt: opts.updatedAt || source.updatedAt || null
+    };
+  }
+
+  function serializeSettingsForBackup(rawSettings) {
+    const settings = normalizeSettings(rawSettings || {});
+    return {
+      id: KCN.APP.settingsId,
+      areaOptions: settings.areaOptions,
+      propertyTypeOptions: settings.propertyTypeOptions,
+      legacyPropertyTypeOptions: settings.legacyPropertyTypeOptions,
+      defaultSort: settings.defaultSort,
+      schemaVersion: KCN.APP.schemaVersion,
+      companyDataModelVersion: 3,
+      sampleInitialized: settings.sampleInitialized,
+      updatedAt: settings.updatedAt
+    };
+  }
+
   function requestResult(request) {
     return new Promise((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
@@ -160,7 +204,11 @@
     const now = KCN.isoNow();
     if (!db) {
       const data = readFallback();
-      let settings = data.settings ? { ...KCN.DEFAULT_SETTINGS, ...data.settings } : clone(KCN.DEFAULT_SETTINGS);
+      const oldSettings = data.settings || {};
+      let settings = normalizeSettings(oldSettings);
+      if (Number(oldSettings.companyDataModelVersion || 0) < 3) {
+        data.companies = data.companies.map(KCN.migrateStoredCompany);
+      }
       if (!settings.sampleInitialized) {
         const existingIds = new Set(data.companies.map((company) => company.id));
         KCN.SAMPLE_COMPANIES.forEach((sample) => {
@@ -168,8 +216,7 @@
         });
         settings.sampleInitialized = true;
       }
-      settings.schemaVersion = KCN.APP.schemaVersion;
-      settings.updatedAt = now;
+      settings = normalizeSettings(settings, { updatedAt: now });
       data.settings = settings;
       writeFallback(data);
       return clone(settings);
@@ -179,17 +226,22 @@
     const done = transactionDone(transaction);
     const companyStore = transaction.objectStore(KCN.APP.companyStore);
     const settingsStore = transaction.objectStore(KCN.APP.settingsStore);
-    const requests = [settingsStore.get(KCN.APP.settingsId), ...KCN.SAMPLE_COMPANIES.map((sample) => companyStore.get(sample.id))];
-    const values = await Promise.all(requests.map(requestResult));
-    let settings = values[0] ? { ...KCN.DEFAULT_SETTINGS, ...values[0] } : clone(KCN.DEFAULT_SETTINGS);
+    const [storedSettings, storedCompanies] = await Promise.all([
+      requestResult(settingsStore.get(KCN.APP.settingsId)),
+      requestResult(companyStore.getAll())
+    ]);
+    let settings = normalizeSettings(storedSettings || {});
+    if (Number((storedSettings && storedSettings.companyDataModelVersion) || 0) < 3) {
+      storedCompanies.forEach((company) => companyStore.put(KCN.migrateStoredCompany(company)));
+    }
     if (!settings.sampleInitialized) {
-      KCN.SAMPLE_COMPANIES.forEach((sample, index) => {
-        if (!values[index + 1]) companyStore.put(KCN.normalizeCompany({ ...sample, createdAt: now, updatedAt: now }));
+      const existingIds = new Set(storedCompanies.map((company) => company.id));
+      KCN.SAMPLE_COMPANIES.forEach((sample) => {
+        if (!existingIds.has(sample.id)) companyStore.put(KCN.normalizeCompany({ ...sample, createdAt: now, updatedAt: now }));
       });
       settings.sampleInitialized = true;
     }
-    settings.schemaVersion = KCN.APP.schemaVersion;
-    settings.updatedAt = now;
+    settings = normalizeSettings(settings, { updatedAt: now });
     settingsStore.put(settings);
     await done;
     return clone(settings);
@@ -343,25 +395,17 @@
 
   async function getSettings() {
     const db = await getDatabase();
-    if (!db) return clone({ ...KCN.DEFAULT_SETTINGS, ...(readFallback().settings || {}) });
+    if (!db) return clone(normalizeSettings(readFallback().settings || {}));
     const transaction = db.transaction(KCN.APP.settingsStore, "readonly");
     const done = transactionDone(transaction);
     const settings = await requestResult(transaction.objectStore(KCN.APP.settingsStore).get(KCN.APP.settingsId));
     await done;
-    return clone({ ...KCN.DEFAULT_SETTINGS, ...(settings || {}), schemaVersion: KCN.APP.schemaVersion });
+    return clone(normalizeSettings(settings || {}));
   }
 
   async function putSettings(rawSettings) {
     const current = await getSettings();
-    const settings = {
-      ...current,
-      ...(rawSettings || {}),
-      id: KCN.APP.settingsId,
-      areaOptions: KCN.uniqueStrings((rawSettings && rawSettings.areaOptions) || current.areaOptions),
-      propertyTypeOptions: KCN.uniqueStrings((rawSettings && rawSettings.propertyTypeOptions) || current.propertyTypeOptions),
-      schemaVersion: KCN.APP.schemaVersion,
-      updatedAt: KCN.isoNow()
-    };
+    const settings = normalizeSettings({ ...current, ...(rawSettings || {}) }, { updatedAt: KCN.isoNow() });
     const db = await getDatabase();
     if (!db) {
       const data = readFallback();
@@ -714,10 +758,10 @@
       appVersion: KCN.APP.version,
       schemaVersion: KCN.APP.schemaVersion,
       exportedAt: KCN.isoNow(),
-      companies: companies.map(KCN.normalizeCompany),
+      companies: companies.map(KCN.serializeCompanyForBackup),
       cases: cases.map(KCN.normalizeCase),
       caseResponses: caseResponses.map(KCN.normalizeCaseResponse),
-      settings: { ...KCN.DEFAULT_SETTINGS, ...(settings || {}), schemaVersion: KCN.APP.schemaVersion }
+      settings: serializeSettingsForBackup(settings || {})
     };
   }
 
@@ -741,21 +785,18 @@
   }
 
   function mergeSettings(current, imported) {
-    if (!imported) return { ...current, schemaVersion: KCN.APP.schemaVersion };
-    return {
+    return normalizeSettings({
       ...current,
-      areaOptions: KCN.uniqueStrings([...(current.areaOptions || []), ...(imported.areaOptions || [])]),
-      propertyTypeOptions: KCN.uniqueStrings([...(current.propertyTypeOptions || []), ...(imported.propertyTypeOptions || [])]),
-      schemaVersion: KCN.APP.schemaVersion,
-      sampleInitialized: true,
-      updatedAt: KCN.isoNow()
-    };
+      ...(imported || {}),
+      areaOptions: [
+        ...(Array.isArray(current.areaOptions) ? current.areaOptions : []),
+        ...(imported && Array.isArray(imported.areaOptions) ? imported.areaOptions : [])
+      ]
+    }, { sampleInitialized: true, updatedAt: KCN.isoNow() });
   }
 
   function replacementSettings(imported) {
-    return imported
-      ? { ...KCN.DEFAULT_SETTINGS, ...imported, id: KCN.APP.settingsId, schemaVersion: KCN.APP.schemaVersion, sampleInitialized: true, updatedAt: KCN.isoNow() }
-      : { ...clone(KCN.DEFAULT_SETTINGS), sampleInitialized: true, schemaVersion: KCN.APP.schemaVersion, updatedAt: KCN.isoNow() };
+    return normalizeSettings(imported || {}, { sampleInitialized: true, updatedAt: KCN.isoNow() });
   }
 
   function assertRestoreGraph(companies, cases, caseResponses) {

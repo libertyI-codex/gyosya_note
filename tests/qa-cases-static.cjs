@@ -145,6 +145,7 @@ const expectedCaseResponseHeaders = [
   "建物面積㎡",
   "案件状況",
   "業者名",
+  "業者名よみがな",
   "担当者名",
   "回答状況",
   "回答金額",
@@ -160,7 +161,7 @@ const expectedCaseResponseHeaders = [
   "回答更新日"
 ];
 
-test("Prototype2必須ファイルと全JavaScriptの構文", () => {
+test("Prototype3必須ファイルと全JavaScriptの構文", () => {
   const required = [
     "index.html",
     "css/styles.css",
@@ -172,7 +173,7 @@ test("Prototype2必須ファイルと全JavaScriptの構文", () => {
     "sw.js",
     "tests/qa-cases-static.cjs",
     "tests/qa-case-performance.cjs",
-    "docs/QA-MATRIX-PROTOTYPE2.md"
+    "docs/QA-MATRIX-PROTOTYPE3.md"
   ];
   required.forEach((relative) => assert.equal(fs.existsSync(path.join(root, relative)), true, relative));
   for (const relative of [
@@ -188,15 +189,15 @@ test("Prototype2必須ファイルと全JavaScriptの構文", () => {
   }
 });
 
-test("APP・schema・DB・cacheがPrototype2契約", () => {
+test("APP・schema・DB・cacheがPrototype3契約", () => {
   const K = runtime();
   assert.equal(K.APP.displayName, "買取業者ノート");
   assert.equal(K.APP.internalName, "Kaitori Company Note");
-  assert.equal(K.APP.version, "Ver.1.0 試作2");
-  assert.equal(K.APP.versionNumber, "1.0.0-prototype.2");
-  assert.equal(K.APP.schemaVersion, 2);
+  assert.equal(K.APP.version, "Ver.1.0 試作3");
+  assert.equal(K.APP.versionNumber, "1.0.0-prototype.3");
+  assert.equal(K.APP.schemaVersion, 3);
   assert.equal(K.APP.dbVersion, 2);
-  assert.equal(K.APP.cacheName, "kaitori-company-note-v1-prototype2");
+  assert.equal(K.APP.cacheName, "kaitori-company-note-v1-prototype3");
   assert.equal(K.APP.caseStore, "cases");
   assert.equal(K.APP.responseStore, "caseResponses");
   assert.ok(read("sw.js").includes(`"${K.APP.cacheName}"`), "APPとService Workerのcache名を一致させてください");
@@ -225,7 +226,7 @@ test("cases・caseResponses storesと参照index契約", () => {
   assert.match(source, /unique\s*:\s*true/, "caseId＋companyIdの重複をDBでも拒否してください");
 });
 
-test("Prototype2の公開DB API契約", () => {
+test("Prototype3の公開DB API契約", () => {
   const K = runtime();
   const expected = [
     "getAllCases",
@@ -354,7 +355,7 @@ test("案件検索・類似候補の純粋関数契約", () => {
   assert.equal(similar[0].id, close.id, "種別・要因・エリアが近い案件を優先します");
 });
 
-test("v2 backup schemaとv1読込互換の静的契約", () => {
+test("v3 backup schemaとv1・v2読込互換の静的契約", () => {
   const K = runtime();
   const v2 = K.validateBackup(v2BackupFixture(K));
   assert.equal(v2.companies.length, 1);
@@ -390,7 +391,7 @@ test("v2 backupは不正参照と重複ペアを全件検証前に拒否", () =>
   assert.equal(JSON.stringify(base), originalJson, "検証失敗で入力fixtureを変更しません");
 });
 
-test("案件・回答CSVの23列ヘッダー契約", () => {
+test("案件・回答CSVの24列ヘッダー契約", () => {
   const K = runtime();
   const csv = K.buildCaseResponsesCsv([], [], []);
   assert.equal(csv.charCodeAt(0), 0xfeff, "UTF-8 BOMが必要です");
@@ -414,7 +415,7 @@ test("回答0件の案件CSVとCSV injection対策", () => {
   assert.equal(row.length, expectedCaseResponseHeaders.length);
   assert.equal(row[0], "'=1+1", "数式先頭文字を無害化します");
   assert.equal(row[9], "", "回答のない案件は業者列を空欄にします");
-  assert.equal(row[11], "", "回答のない案件は回答状況を空欄にします");
+  assert.equal(row[12], "", "回答のない案件は回答状況を空欄にします");
 });
 
 test("下部ナビと主要screenは4項目だけ", () => {
@@ -454,4 +455,4 @@ test("PWA cacheは同一origin GETだけを扱う", () => {
   }
 });
 
-console.log(`PROTOTYPE2 STATIC RESULT: ${passed} tests passed`);
+console.log(`PROTOTYPE3 CASES STATIC RESULT: ${passed} tests passed`);

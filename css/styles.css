@@ -61,8 +61,11 @@ body {
   -webkit-tap-highlight-color: rgb(166 83 63 / 16%);
 }
 
-body:has(dialog[open]) {
+body.has-dialog-open {
+  position: fixed;
+  width: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,
@@ -361,6 +364,17 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.chip::before {
+  content: "";
+  flex: 0 0 12px;
+  width: 12px;
+  margin-right: 5px;
+  color: currentColor;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+}
+
 .chip:hover {
   border-color: #8c99a8;
   background: var(--surface-muted);
@@ -375,8 +389,36 @@ button:disabled {
 
 .chip.is-selected::before {
   content: "✓";
-  margin-right: 5px;
+  opacity: 1;
+}
+
+.chip-clear {
+  min-height: 44px;
+  padding: 7px 4px;
+  border: 0;
+  background: transparent;
+  color: #245f94;
   font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.purchase-target-catalog {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.purchase-target-group {
+  min-width: 0;
+}
+
+.purchase-target-group h4 {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .segmented-control {
@@ -635,18 +677,6 @@ textarea:focus {
   box-shadow: var(--shadow-sm);
 }
 
-.company-card[data-temperature="積極的"] {
-  border-left-color: var(--active);
-}
-
-.company-card[data-temperature="通常"] {
-  border-left-color: var(--normal);
-}
-
-.company-card[data-temperature="現在休止"] {
-  border-left-color: var(--paused);
-}
-
 .company-card__header {
   display: flex;
   min-width: 0;
@@ -672,6 +702,14 @@ textarea:focus {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.company-card__heading .company-name-kana,
+.detail-hero .company-name-kana {
+  margin-top: 2px;
+  color: #6d7784;
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 
 .favorite-button {
@@ -701,7 +739,6 @@ textarea:focus {
   margin-top: 8px;
 }
 
-.temperature-badge,
 .sample-badge,
 .storage-badge {
   display: inline-flex;
@@ -712,21 +749,6 @@ textarea:focus {
   font-size: 11px;
   font-weight: 800;
   line-height: 1.2;
-}
-
-.temperature-badge--active {
-  background: var(--active-soft);
-  color: var(--active);
-}
-
-.temperature-badge--normal {
-  background: var(--normal-soft);
-  color: var(--normal);
-}
-
-.temperature-badge--paused {
-  background: var(--paused-soft);
-  color: var(--paused);
 }
 
 .sample-badge {
@@ -1133,6 +1155,7 @@ textarea:focus {
 .bottom-nav__inner {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: minmax(var(--nav-height), 1fr);
   width: min(100%, 660px);
   min-height: var(--nav-height);
   margin: 0 auto;
@@ -1140,6 +1163,7 @@ textarea:focus {
 
 .bottom-nav button {
   display: grid;
+  width: 100%;
   min-width: 0;
   min-height: var(--nav-height);
   place-items: center;
@@ -1152,6 +1176,13 @@ textarea:focus {
   color: #aeb9c8;
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.bottom-nav button span {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .bottom-nav button svg {
@@ -1206,6 +1237,8 @@ dialog {
 .app-dialog {
   width: min(calc(100% - 16px), 720px);
   max-width: 720px;
+  max-height: calc(100vh - 16px);
+  max-height: calc(100svh - 16px);
   max-height: calc(100dvh - 16px);
   padding: 0;
   border: 1px solid #aeb8c3;
@@ -1228,7 +1261,11 @@ dialog {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
-  height: min(820px, calc(100dvh - 16px));
+  height: min(820px, calc(100vh - 16px));
+  height: min(820px, calc(100svh - 16px));
+  height: min(820px, calc(var(--visual-viewport-height, 100dvh) - 16px));
+  max-height: calc(100vh - 16px);
+  max-height: calc(100svh - 16px);
   max-height: calc(100dvh - 16px);
   margin: 0;
   overflow: hidden;
@@ -1306,6 +1343,39 @@ dialog {
 
 .dialog-footer .button {
   min-height: 48px;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.field-hint.is-auto-candidate {
+  color: #245f94;
+}
+
+.fixed-catalog-note {
+  padding: 12px;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.fixed-catalog-note h3,
+.fixed-catalog-note p {
+  margin: 0;
+}
+
+.fixed-catalog-note p,
+#property-options-summary {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .form-section {
@@ -1888,12 +1958,18 @@ dialog {
   .app-dialog {
     width: calc(100% - 10px);
     max-width: none;
+    max-height: calc(100vh - 10px);
+    max-height: calc(100svh - 10px);
     max-height: calc(100dvh - 10px);
     border-radius: 13px;
   }
 
   .dialog-shell {
-    height: calc(100dvh - 10px);
+    height: calc(100vh - 10px);
+    height: calc(100svh - 10px);
+    height: calc(var(--visual-viewport-height, 100dvh) - 10px);
+    max-height: calc(100vh - 10px);
+    max-height: calc(100svh - 10px);
     max-height: calc(100dvh - 10px);
   }
 

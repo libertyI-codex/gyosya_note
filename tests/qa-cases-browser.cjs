@@ -49,9 +49,9 @@ async function closeIfOpen(page, selector) {
 async function seedCompanies(page) {
   await page.evaluate(async () => {
     const rows = [
-      { id: "company-a", companyName: "横浜積極買取", contactName: "山田", phone: "045-111-1111", email: "a@example.jp", areas: ["横浜"], propertyTypes: ["戸建", "土地"], temperature: "積極的", isFavorite: true },
-      { id: "company-b", companyName: "神奈川通常買取", contactName: "佐藤", phone: "045-222-2222", email: "b@example.jp", areas: ["神奈川県全域"], propertyTypes: ["戸建"], temperature: "通常", isFavorite: false },
-      { id: "company-c", companyName: "対象外サンプル", contactName: "鈴木", phone: "", email: "", areas: ["東京都"], propertyTypes: ["ビル"], temperature: "現在休止", isFavorite: false }
+      { id: "company-a", companyName: "横浜総合買取", companyNameKana: "よこはまそうごうかいとり", contactName: "山田", phone: "045-111-1111", email: "a@example.jp", areas: ["yokohama"], purchaseTargetIds: ["detached-single-lot", "land", "development", "rebuild-impossible"], isFavorite: true },
+      { id: "company-b", companyName: "神奈川広域買取", companyNameKana: "かながわこういきかいとり", contactName: "佐藤", phone: "045-222-2222", email: "b@example.jp", areas: ["kanagawa-all"], purchaseTargetIds: ["detached-single-lot"], isFavorite: false },
+      { id: "company-c", companyName: "対象外サンプル", companyNameKana: "たいしょうがいさんぷる", contactName: "鈴木", phone: "", email: "", areas: ["tokyo"], purchaseTargetIds: ["building"], isFavorite: false }
     ];
     for (const row of rows) await KCN.db.putCompany(KCN.normalizeCompany(row));
     await KCN.app.reloadData();
@@ -146,7 +146,7 @@ async function openCaseCard(page, name) {
       await openCaseCard(page, "横浜市南区・古家付き土地");
       await page.locator("#case-add-companies").click();
       const names = await page.locator("#quick-company-list .selectable-company strong").allTextContents();
-      assert.match(names[0], /横浜積極買取/);
+      assert.match(names[0], /横浜総合買取/);
       await page.locator('[data-select-company-id="company-a"]').check();
       await page.locator('[data-select-company-id="company-b"]').check();
       assert.match(await page.locator("#add-selected-companies").innerText(), /2社/);
@@ -160,7 +160,7 @@ async function openCaseCard(page, name) {
     });
 
     await check("回答状況・金額・理由・関連要因・次回確認・メモを保存", async () => {
-      const card = page.locator("#case-response-list .response-card").filter({ hasText: "横浜積極買取" });
+      const card = page.locator("#case-response-list .response-card").filter({ hasText: "横浜総合買取" });
       await card.locator("[data-edit-response-id]").click();
       await page.locator("#response-status").selectOption("金額回答");
       await page.locator("#response-amount").fill("200");
@@ -180,18 +180,18 @@ async function openCaseCard(page, name) {
     });
 
     await check("回答待ち・金額順・未登録連絡ボタン", async () => {
-      const waiting = page.locator("#case-response-list .response-card").filter({ hasText: "神奈川通常買取" });
+      const waiting = page.locator("#case-response-list .response-card").filter({ hasText: "神奈川広域買取" });
       await waiting.locator("[data-edit-response-id]").click();
       await page.locator("#response-status").selectOption("回答待ち");
       await page.locator("#save-response").click();
       await page.locator("#response-dialog").waitFor({ state: "hidden" });
-      assert.match(await page.locator("#case-response-list .response-card").first().innerText(), /横浜積極買取/);
+      assert.match(await page.locator("#case-response-list .response-card").first().innerText(), /横浜総合買取/);
       await page.locator("#response-sort").selectOption("amount");
       assert.match(await page.locator("#case-response-list .response-card").first().innerText(), /200万円/);
     });
 
     await check("業者詳細で回答履歴・案件リンク・集計", async () => {
-      await page.locator("#case-response-list .response-card").filter({ hasText: "横浜積極買取" }).locator("[data-detail-id]").click();
+      await page.locator("#case-response-list .response-card").filter({ hasText: "横浜総合買取" }).locator("[data-detail-id]").click();
       await page.locator("#detail-dialog").waitFor({ state: "visible" });
       const history = await page.locator(".company-history").innerText();
       assert.match(history, /過去回答/);
@@ -210,12 +210,12 @@ async function openCaseCard(page, name) {
       assert.equal(await page.evaluate(() => KCN.caseUI.getState().responses.some((item) => item.companyId === "company-a")), true);
       await closeIfOpen(page, "#case-detail-dialog");
       await page.locator('[data-nav="list"]').click();
-      assert.equal(await page.locator("#company-list").getByText("横浜積極買取").count(), 0);
+      assert.equal(await page.locator("#company-list").getByText("横浜総合買取").count(), 0);
       await page.locator('[data-nav="other"]').click();
       const settingsDetails = page.locator(".settings-card").filter({ hasText: "詳細設定" });
       if (!(await settingsDetails.getAttribute("open"))) await settingsDetails.locator("summary").click();
       await page.locator("#open-advanced-settings").click();
-      assert.match(await page.locator("#archived-company-list").innerText(), /横浜積極買取/);
+      assert.match(await page.locator("#archived-company-list").innerText(), /横浜総合買取/);
       await page.locator('[data-restore-company-id="company-a"]').click();
       await page.waitForFunction(() => KCN.app.state.companies.find((item) => item.id === "company-a")?.isArchived === false);
       await closeIfOpen(page, "#advanced-settings-dialog");
@@ -223,7 +223,7 @@ async function openCaseCard(page, name) {
 
     await check("案件検索・種別・要因・回答待ち絞り込み", async () => {
       await page.locator('[data-nav="cases"]').click();
-      await page.locator("#case-query").fill("現況引渡し 横浜積極買取");
+      await page.locator("#case-query").fill("現況引渡し 横浜総合買取");
       assert.equal(await page.locator("#case-list .case-card").count(), 1);
       await page.locator("#case-filter-details > summary").click();
       await page.locator("#clear-case-filters").click();
@@ -238,7 +238,7 @@ async function openCaseCard(page, name) {
 
     await check("類似案件は自分を除外し種別・要因・エリアを表示", async () => {
       await page.evaluate(async () => {
-        await KCN.db.putCase(KCN.normalizeCase({ id: "similar-case", caseName: "横浜類似案件", area: "横浜", caseType: "detached-single-lot", factors: ["development"], status: "相談中" }));
+        await KCN.db.putCase(KCN.normalizeCase({ id: "similar-case", caseName: "横浜類似案件", area: "yokohama", caseType: "detached-single-lot", factors: ["development"], status: "相談中" }));
         await KCN.caseUI.reload();
       });
       await openCaseCard(page, "横浜市南区・古家付き土地");
@@ -260,7 +260,8 @@ async function openCaseCard(page, name) {
       assert.deepEqual([...csv.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
       const text = csv.toString("utf8");
       assert.ok(text.includes("案件名だけテスト"));
-      assert.ok(text.includes("横浜積極買取"));
+      assert.ok(text.includes("横浜総合買取"));
+      assert.ok(text.includes("よこはまそうごうかいとり"));
       assert.ok(text.includes("\r\n"));
     });
 

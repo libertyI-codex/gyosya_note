@@ -1,0 +1,77 @@
+{
+  "passed": 18,
+  "results": [
+    {
+      "name": "IndexedDB v2 migrates legacy company targets in place without changing cases or responses",
+      "status": "PASS"
+    },
+    {
+      "name": "case route works once from icon, text, and padding with synchronized state",
+      "status": "PASS"
+    },
+    {
+      "name": "all four routes survive ten consecutive transitions and reload",
+      "status": "PASS"
+    },
+    {
+      "name": "390x844 bottom nav is one equal-width row with stable active typography",
+      "status": "PASS"
+    },
+    {
+      "name": "company dialog opens from search/list FAB and the zero-company action",
+      "status": "PASS"
+    },
+    {
+      "name": "390x500 dialog scroll keeps header/footer fixed and restores background",
+      "status": "PASS"
+    },
+    {
+      "name": "dialog survives repeated open/close and keyboard-equivalent short viewport",
+      "status": "PASS"
+    },
+    {
+      "name": "katakana and IME composition create editable candidates without overwriting manual kana",
+      "status": "PASS"
+    },
+    {
+      "name": "area bulk actions, Chiba, off behavior, and clear-all follow inclusion rules",
+      "status": "PASS"
+    },
+    {
+      "name": "purchase targets share 10+17 categories, All excludes other, and custom supplement persists",
+      "status": "PASS"
+    },
+    {
+      "name": "case type and factor selection has stable geometry",
+      "status": "PASS"
+    },
+    {
+      "name": "response status and reason controls do not change geometry when selected",
+      "status": "PASS"
+    },
+    {
+      "name": "company save, kana search, custom search, detail, duplicate, and duplicate-return paths work",
+      "status": "PASS"
+    },
+    {
+      "name": "390x500 and 1440 keep one nav row, no horizontal overflow, and usable dialogs",
+      "status": "PASS"
+    },
+    {
+      "name": "HTTP run has no unhandled JavaScript or console errors",
+      "status": "PASS"
+    },
+    {
+      "name": "file protocol opens cases and company dialog without a service worker",
+      "status": "PASS"
+    },
+    {
+      "name": "PWA activation removes only old app caches",
+      "status": "PASS"
+    },
+    {
+      "name": "offline restart still opens the case route exactly once",
+      "status": "PASS"
+    }
+  ]
+}

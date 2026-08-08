@@ -94,7 +94,7 @@ test("PNG寸法と完全不透明形式", () => {
 
 test("Service Workerのキャッシュ名・安全な旧版削除・外部URL除外", () => {
   const sw = read("sw.js");
-  assert.ok(sw.includes('"kaitori-company-note-v1-prototype2"'));
+  assert.ok(sw.includes('"kaitori-company-note-v1-prototype3"'));
   assert.ok(sw.includes('name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME'));
   assert.ok(sw.includes("url.origin !== self.location.origin"));
   assert.ok(sw.includes("request.method !== \"GET\""));

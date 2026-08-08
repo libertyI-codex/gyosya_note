@@ -1,19 +1,19 @@
 "use strict";
 
-const CACHE_NAME = "kaitori-company-note-v1-prototype2";
+const CACHE_NAME = "kaitori-company-note-v1-prototype3";
 const CACHE_PREFIX = "kaitori-company-note-";
 const APP_SHELL = [
   "./",
   "./index.html",
-  "./css/styles.css",
-  "./js/constants.js",
-  "./js/utils.js",
-  "./js/db.js",
-  "./js/cases-ui.js",
-  "./js/app.js",
-  "./manifest.webmanifest",
-  "./apple-touch-icon.png",
-  "./icon-192.png",
+  "./css/styles.css?v=prototype3",
+  "./js/constants.js?v=prototype3",
+  "./js/utils.js?v=prototype3",
+  "./js/db.js?v=prototype3",
+  "./js/cases-ui.js?v=prototype3",
+  "./js/app.js?v=prototype3",
+  "./manifest.webmanifest?v=prototype3",
+  "./apple-touch-icon.png?v=prototype3",
+  "./icon-192.png?v=prototype3",
   "./icon-512.png",
   "./icon-maskable-512.png",
   "./icons/icon-source.svg"
@@ -65,16 +65,17 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(async () => {
-          const direct = await caches.match(request);
+          const cache = await caches.open(CACHE_NAME);
+          const direct = await cache.match(request);
           if (direct) return direct;
-          return caches.match(new URL("./index.html", self.registration.scope).href);
+          return cache.match(new URL("./index.html", self.registration.scope).href);
         })
     );
     return;
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
+    caches.open(CACHE_NAME).then((cache) => cache.match(request)).then((cached) => {
       if (cached) return cached;
       return fetch(request).then((response) => {
         if (response && response.ok && response.type === "basic") {

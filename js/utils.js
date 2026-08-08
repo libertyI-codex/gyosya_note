@@ -9,9 +9,20 @@
     ignorePunctuation: true
   });
 
+  function katakanaToHiragana(value) {
+    return String(value == null ? "" : value)
+      .normalize("NFKC")
+      .replace(/[ァ-ヶ]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0x60))
+      .replace(/ヽ/g, "ゝ")
+      .replace(/ヾ/g, "ゞ");
+  }
+
   function normalizeText(value) {
     return String(value == null ? "" : value)
       .normalize("NFKC")
+      .replace(/[ァ-ヶ]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0x60))
+      .replace(/ヽ/g, "ゝ")
+      .replace(/ヾ/g, "ゞ")
       .replace(/[\s\u3000]+/g, " ")
       .trim()
       .toLocaleLowerCase("ja-JP");
@@ -29,6 +40,10 @@
       .replace(/\r\n?/g, "\n")
       .trim();
     return typeof maxLength === "number" ? normalized.slice(0, maxLength) : normalized;
+  }
+
+  function normalizeKana(value) {
+    return katakanaToHiragana(cleanSingleLine(value));
   }
 
   function normalizeCompanyKey(value) {
@@ -85,6 +100,103 @@
       }
     });
     return result;
+  }
+
+  function normalizeAreaId(value) {
+    const cleaned = cleanSingleLine(value);
+    if (!cleaned) return "";
+    if (KCN.AREA_IDS.includes(cleaned)) return cleaned;
+    return KCN.AREA_ID_BY_LABEL[cleaned] || cleaned;
+  }
+
+  function areaLabel(value) {
+    const id = normalizeAreaId(value);
+    return KCN.AREA_LABELS[id] || cleanSingleLine(value);
+  }
+
+  function normalizeAreaValues(values) {
+    return uniqueStrings(values).map(normalizeAreaId).filter(Boolean);
+  }
+
+  function expandAreaSelection(values) {
+    const selected = normalizeAreaValues(values);
+    const expanded = [];
+    const seen = new Set();
+    selected.forEach((id) => {
+      const valuesToAdd = KCN.AREA_INCLUSION_RULES[id] || [id];
+      valuesToAdd.forEach((value) => {
+        if (!seen.has(value)) {
+          seen.add(value);
+          expanded.push(value);
+        }
+      });
+    });
+    return expanded;
+  }
+
+  function normalizePurchaseTargetId(value) {
+    const cleaned = cleanSingleLine(value);
+    if (!cleaned) return "";
+    if (KCN.PURCHASE_TARGET_IDS.includes(cleaned)) return cleaned;
+    return KCN.PURCHASE_TARGET_IDS.find((id) => KCN.PURCHASE_TARGET_LABELS[id] === cleaned) || "";
+  }
+
+  function purchaseTargetLabel(value) {
+    return KCN.PURCHASE_TARGET_LABELS[cleanSingleLine(value)] || cleanSingleLine(value);
+  }
+
+  function expandPurchaseTargetSelection(values) {
+    const selected = uniqueStrings(values);
+    if (!selected.includes("all")) {
+      return selected.filter((value) => KCN.PURCHASE_TARGET_IDS.includes(value));
+    }
+    return uniqueStrings([
+      "all",
+      ...KCN.PURCHASE_TARGET_ALL_IDS,
+      ...selected.filter((value) => value !== "all" && KCN.PURCHASE_TARGET_IDS.includes(value))
+    ]);
+  }
+
+  function migrateLegacyPurchaseTargets(propertyTypes, existingIds, existingLegacy) {
+    const purchaseTargetIds = [];
+    const legacyPurchaseTargets = [];
+    const targetSeen = new Set();
+    const legacySeen = new Set();
+    const addTarget = (id) => {
+      if (KCN.PURCHASE_TARGET_IDS.includes(id) && !targetSeen.has(id)) {
+        targetSeen.add(id);
+        purchaseTargetIds.push(id);
+      }
+    };
+    const addLegacy = (value) => {
+      const cleaned = cleanSingleLine(value);
+      const key = normalizeText(cleaned);
+      if (cleaned && !legacySeen.has(key)) {
+        legacySeen.add(key);
+        legacyPurchaseTargets.push(cleaned);
+      }
+    };
+
+    uniqueStrings(existingIds).forEach((value) => {
+      if (value === "all") {
+        KCN.PURCHASE_TARGET_ALL_IDS.forEach(addTarget);
+        return;
+      }
+      const id = normalizePurchaseTargetId(value);
+      if (id) addTarget(id);
+      else addLegacy(value);
+    });
+    uniqueStrings(propertyTypes).forEach((value) => {
+      const mapped = KCN.LEGACY_PURCHASE_TARGET_MAP[value];
+      if (mapped) mapped.forEach(addTarget);
+      else {
+        const directId = normalizePurchaseTargetId(value);
+        if (directId) addTarget(directId);
+        else addLegacy(value);
+      }
+    });
+    uniqueStrings(existingLegacy).forEach(addLegacy);
+    return { purchaseTargetIds, legacyPurchaseTargets };
   }
 
   function isValidIsoDateTime(value) {
@@ -167,13 +279,6 @@
       .replace(/'/g, "&#039;");
   }
 
-  function temperatureRank(value) {
-    if (value === KCN.TEMPERATURES.ACTIVE) return 0;
-    if (value === KCN.TEMPERATURES.NORMAL) return 1;
-    if (value === KCN.TEMPERATURES.PAUSED) return 2;
-    return 3;
-  }
-
   function normalizeCompany(raw, options) {
     const source = raw && typeof raw === "object" ? raw : {};
     const opts = options || {};
@@ -183,21 +288,27 @@
     const updatedAt = typeof source.updatedAt === "string" && !Number.isNaN(Date.parse(source.updatedAt))
       ? source.updatedAt
       : (opts.updatedAt || createdAt);
-    const temperatureValues = Object.values(KCN.TEMPERATURES);
     const isArchived = source.isArchived === true;
     const archivedAt = isArchived
       ? (isValidIsoDateTime(source.archivedAt) ? source.archivedAt : (opts.archivedAt || updatedAt))
       : null;
+    const migratedTargets = migrateLegacyPurchaseTargets(
+      source.propertyTypes,
+      source.purchaseTargetIds,
+      source.legacyPurchaseTargets
+    );
     return {
       id: cleanSingleLine(source.id) || uuid(),
       companyName: cleanSingleLine(source.companyName),
+      companyNameKana: normalizeKana(source.companyNameKana).slice(0, 120),
       contactName: cleanSingleLine(source.contactName),
       phone: cleanSingleLine(source.phone),
       email: normalizeEmail(source.email),
-      areas: uniqueStrings(source.areas),
+      areas: normalizeAreaValues(source.areas),
       customArea: cleanSingleLine(source.customArea).slice(0, 120),
-      propertyTypes: uniqueStrings(source.propertyTypes),
-      temperature: temperatureValues.includes(source.temperature) ? source.temperature : KCN.TEMPERATURES.NORMAL,
+      purchaseTargetIds: migratedTargets.purchaseTargetIds,
+      customPurchaseTarget: cleanMultiline(source.customPurchaseTarget, 300),
+      legacyPurchaseTargets: migratedTargets.legacyPurchaseTargets,
       isFavorite: source.isFavorite === true,
       memo: cleanMultiline(source.memo, 500),
       createdAt,
@@ -207,6 +318,37 @@
       archivedAt,
       schemaVersion: KCN.APP.schemaVersion,
       extra: source.extra && typeof source.extra === "object" && !Array.isArray(source.extra) ? source.extra : {}
+    };
+  }
+
+  // IndexedDB v2のストアを維持したまま、既存の生レコードへ試作3項目を補完する。
+  // 元フィールドを先に展開するためtemperature/propertyTypes等は移行時に消さない。
+  function migrateStoredCompany(raw) {
+    const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    return { ...source, ...normalizeCompany(source), schemaVersion: KCN.APP.schemaVersion };
+  }
+
+  function serializeCompanyForBackup(raw) {
+    const company = normalizeCompany(raw);
+    return {
+      id: company.id,
+      companyName: company.companyName,
+      companyNameKana: company.companyNameKana,
+      contactName: company.contactName,
+      phone: company.phone,
+      email: company.email,
+      areas: company.areas,
+      customArea: company.customArea,
+      purchaseTargetIds: company.purchaseTargetIds,
+      customPurchaseTarget: company.customPurchaseTarget,
+      legacyPurchaseTargets: company.legacyPurchaseTargets,
+      isFavorite: company.isFavorite,
+      memo: company.memo,
+      isArchived: company.isArchived,
+      archivedAt: company.archivedAt,
+      isSample: company.isSample,
+      createdAt: company.createdAt,
+      updatedAt: company.updatedAt
     };
   }
 
@@ -223,7 +365,7 @@
       id: cleanSingleLine(source.id) || uuid(),
       caseName: cleanSingleLine(source.caseName).slice(0, 120),
       location: cleanSingleLine(source.location).slice(0, 160),
-      area: cleanSingleLine(source.area).slice(0, 80),
+      area: normalizeAreaId(source.area).slice(0, 80),
       customArea: cleanSingleLine(source.customArea).slice(0, 120),
       caseType,
       customCaseType: cleanSingleLine(source.customCaseType).slice(0, 80),
@@ -274,6 +416,7 @@
       item.caseName,
       item.location,
       item.area,
+      areaLabel(item.area),
       item.customArea,
       caseTypeLabel(item.caseType, item.customCaseType),
       ...(item.factors || []).map(caseFactorLabel),
@@ -289,7 +432,7 @@
     const selectedTypes = Array.isArray(f.caseTypes) ? f.caseTypes : (f.caseType ? [f.caseType] : []);
     const selectedFactors = Array.isArray(f.factors) ? f.factors : (f.factor ? [f.factor] : []);
     const selectedStatuses = Array.isArray(f.statuses) ? f.statuses : (f.status ? [f.status] : []);
-    if (selectedAreas.length && !selectedAreas.some((area) => area === item.area || area === item.customArea)) return false;
+    if (selectedAreas.length && !areaMatches([item.area], selectedAreas) && !selectedAreas.some((area) => area === item.customArea)) return false;
     if (selectedTypes.length && !selectedTypes.includes(item.caseType)) return false;
     if (selectedFactors.length && !selectedFactors.some((factor) => (item.factors || []).includes(factor))) return false;
     if (selectedStatuses.length && !selectedStatuses.includes(item.status)) return false;
@@ -414,42 +557,46 @@
   function companySearchHaystack(company) {
     return normalizeText([
       company.companyName,
+      company.companyNameKana,
       company.contactName,
       company.phone,
       company.email,
       ...(company.areas || []),
+      ...(company.areas || []).map(areaLabel),
       company.customArea,
-      ...(company.propertyTypes || []),
+      ...(company.purchaseTargetIds || []).map(purchaseTargetLabel),
+      ...(company.legacyPurchaseTargets || []),
+      company.customPurchaseTarget,
       company.memo
     ].join(" "));
   }
 
   function areaMatches(companyAreas, selectedAreas) {
-    if (!selectedAreas.length) return true;
-    const companySet = new Set(companyAreas || []);
-    const broadCoverage = {
-      "横浜": ["神奈川県全域", "関東", "全国"],
-      "川崎": ["神奈川県全域", "関東", "全国"],
-      "湘南": ["神奈川県全域", "関東", "全国"],
-      "県央": ["神奈川県全域", "関東", "全国"],
-      "横須賀・三浦": ["神奈川県全域", "関東", "全国"],
-      "県西": ["神奈川県全域", "関東", "全国"],
-      "東京都": ["関東", "全国"],
-      "神奈川県全域": ["関東", "全国"],
-      "関東": ["全国"],
-      "全国": [],
-      "その他": ["全国"]
-    };
-    return selectedAreas.some((selected) => companySet.has(selected) || (broadCoverage[selected] || []).some((area) => companySet.has(area)));
+    const requested = normalizeAreaValues(selectedAreas);
+    if (!requested.length) return true;
+    const coverage = new Set(expandAreaSelection(companyAreas));
+    return requested.some((selected) => coverage.has(selected));
   }
 
   function matchesCompany(company, filters) {
     const f = filters || {};
     const selectedAreas = Array.isArray(f.areas) ? f.areas : [];
-    const selectedTypes = Array.isArray(f.propertyTypes) ? f.propertyTypes : [];
+    const selectedTypes = Array.isArray(f.purchaseTargetIds)
+      ? f.purchaseTargetIds
+      : (Array.isArray(f.propertyTypes) ? f.propertyTypes : []);
     if (!areaMatches(company.areas || [], selectedAreas)) return false;
-    if (selectedTypes.length && !selectedTypes.some((type) => (company.propertyTypes || []).includes(type))) return false;
-    if (f.temperature && f.temperature !== "すべて" && company.temperature !== f.temperature) return false;
+    if (selectedTypes.length) {
+      const normalizedCompany = normalizeCompany(company);
+      const companyIds = new Set(normalizedCompany.purchaseTargetIds);
+      const companyLegacy = new Set(normalizedCompany.legacyPurchaseTargets.map(normalizeText));
+      const matched = selectedTypes.some((value) => {
+        const legacyMappedIds = KCN.LEGACY_PURCHASE_TARGET_MAP[cleanSingleLine(value)];
+        if (legacyMappedIds) return legacyMappedIds.some((id) => companyIds.has(id));
+        const id = normalizePurchaseTargetId(value);
+        return id ? companyIds.has(id) : companyLegacy.has(normalizeText(value));
+      });
+      if (!matched) return false;
+    }
     if (f.favoriteOnly && !company.isFavorite) return false;
 
     const query = normalizeText(f.query || "");
@@ -468,15 +615,16 @@
   }
 
   function compareCompanies(a, b, sortMode) {
-    const nameCompare = japaneseCollator.compare(a.companyName || "", b.companyName || "");
+    const nameCompare = japaneseCollator.compare(
+      normalizeKana(a.companyNameKana) || a.companyName || "",
+      normalizeKana(b.companyNameKana) || b.companyName || ""
+    );
     const idCompare = String(a.id || "").localeCompare(String(b.id || ""));
     if (sortMode === "favorite") return Number(b.isFavorite) - Number(a.isFavorite) || nameCompare || idCompare;
-    if (sortMode === "temperature") return temperatureRank(a.temperature) - temperatureRank(b.temperature) || nameCompare || idCompare;
     if (sortMode === "updated") return String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")) || nameCompare || idCompare;
     if (sortMode === "created") return String(b.createdAt || "").localeCompare(String(a.createdAt || "")) || nameCompare || idCompare;
     if (sortMode === "search") {
       return Number(b.isFavorite) - Number(a.isFavorite)
-        || temperatureRank(a.temperature) - temperatureRank(b.temperature)
         || nameCompare
         || idCompare;
     }
@@ -508,30 +656,43 @@
   }
 
   function buildCsv(companies) {
-    const headers = ["業者名", "担当者名", "電話番号", "メール", "買取エリア", "買取対象", "温度感", "お気に入り", "メモ", "登録日", "更新日"];
-    const rows = (companies || []).map((company) => [
-      company.companyName,
-      company.contactName,
-      company.phone,
-      company.email,
-      [...(company.areas || []), company.customArea].filter(Boolean).join(" / "),
-      (company.propertyTypes || []).join(" / "),
-      company.temperature,
-      company.isFavorite ? "はい" : "いいえ",
-      company.memo,
-      company.createdAt,
-      company.updatedAt
-    ]);
+    const headers = [
+      "業者名", "業者名よみがな", "担当者名", "電話番号", "メール", "買取エリア", "買取対象",
+      "その他補足", "お気に入り", "メモ", "登録日", "更新日"
+    ];
+    const rows = (companies || []).map((rawCompany) => {
+      const company = normalizeCompany(rawCompany);
+      return [
+        company.companyName,
+        company.companyNameKana,
+        company.contactName,
+        company.phone,
+        company.email,
+        [...company.areas.map(areaLabel), company.customArea].filter(Boolean).join(" / "),
+        [
+          ...company.purchaseTargetIds.map(purchaseTargetLabel),
+          ...company.legacyPurchaseTargets
+        ].join(" / "),
+        company.customPurchaseTarget,
+        company.isFavorite ? "はい" : "いいえ",
+        company.memo,
+        company.createdAt,
+        company.updatedAt
+      ];
+    });
     return "\uFEFF" + [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\r\n");
   }
 
   function buildCaseResponsesCsv(cases, responses, companies) {
     const headers = [
       "案件名", "所在地", "エリア", "案件種別", "個別要因", "売主希望額", "土地面積㎡", "建物面積㎡", "案件状況",
-      "業者名", "担当者名", "回答状況", "回答金額", "回答日", "回答理由", "回答関連要因", "次回確認日", "回答メモ",
+      "業者名", "業者名よみがな", "担当者名", "回答状況", "回答金額", "回答日", "回答理由", "回答関連要因", "次回確認日", "回答メモ",
       "案件メモ", "案件登録日", "案件更新日", "回答登録日", "回答更新日"
     ];
-    const companyMap = new Map((Array.isArray(companies) ? companies : []).map((company) => [company.id, company]));
+    const companyMap = new Map((Array.isArray(companies) ? companies : []).map((rawCompany) => {
+      const company = normalizeCompany(rawCompany);
+      return [company.id, company];
+    }));
     const responsesByCase = new Map();
     (Array.isArray(responses) ? responses : []).forEach((response) => {
       if (!response || !response.caseId) return;
@@ -546,7 +707,7 @@
         rows.push([
           caseRecord.caseName,
           caseRecord.location,
-          [caseRecord.area, caseRecord.customArea].filter(Boolean).join(" / "),
+          [areaLabel(caseRecord.area), caseRecord.customArea].filter(Boolean).join(" / "),
           caseTypeLabel(caseRecord.caseType, caseRecord.customCaseType),
           (caseRecord.factors || []).map(caseFactorLabel).join(" / "),
           caseRecord.askingPrice == null ? "" : caseRecord.askingPrice,
@@ -554,6 +715,7 @@
           caseRecord.buildingArea == null ? "" : caseRecord.buildingArea,
           caseRecord.status,
           response ? (response.companyNameSnapshot || (company && company.companyName) || "") : "",
+          response && company ? (company.companyNameKana || "") : "",
           response ? (response.contactNameSnapshot || (company && company.contactName) || "") : "",
           response ? response.responseStatus : "",
           response && response.responseAmount != null ? response.responseAmount : "",
@@ -613,14 +775,30 @@
       const normalizedId = validatedId(raw.id, index, "業者", companyIds);
       if (typeof raw.companyName !== "string" || !raw.companyName.trim()) throw new Error(`${index + 1}件目の業者名が不正です。`);
       if (raw.companyName.length > 120) throw new Error(`${index + 1}件目の業者名が長すぎます。`);
-      const arrayFields = ["areas", "propertyTypes"];
+      const arrayFields = ["areas", "propertyTypes", "purchaseTargetIds", "legacyPurchaseTargets"];
       arrayFields.forEach((field) => {
         if (raw[field] != null && (!Array.isArray(raw[field]) || raw[field].some((value) => typeof value !== "string"))) {
           throw new Error(`${index + 1}件目の${field}が不正です。`);
         }
       });
-      validateStringFields(raw, ["contactName", "phone", "email", "customArea", "temperature", "memo", "createdAt", "updatedAt"], index, "業者");
-      if (raw.temperature != null && !Object.values(KCN.TEMPERATURES).includes(raw.temperature)) throw new Error(`${index + 1}件目の温度感が不正です。`);
+      validateStringFields(raw, [
+        "companyNameKana", "contactName", "phone", "email", "customArea", "customPurchaseTarget",
+        "temperature", "memo", "createdAt", "updatedAt"
+      ], index, "業者");
+      if (sourceSchemaVersion >= 3 && raw.purchaseTargetIds != null
+        && raw.purchaseTargetIds.some((value) => !KCN.PURCHASE_TARGET_IDS.includes(value))) {
+        throw new Error(`${index + 1}件目の買取対象IDが不正です。`);
+      }
+      if (sourceSchemaVersion >= 3 && Array.isArray(raw.purchaseTargetIds)
+        && new Set(raw.purchaseTargetIds).size !== raw.purchaseTargetIds.length) {
+        throw new Error(`${index + 1}件目の買取対象IDが重複しています。`);
+      }
+      if (sourceSchemaVersion >= 3 && Array.isArray(raw.legacyPurchaseTargets)
+        && new Set(raw.legacyPurchaseTargets.map(normalizeText)).size !== raw.legacyPurchaseTargets.length) {
+        throw new Error(`${index + 1}件目の旧買取対象が重複しています。`);
+      }
+      if (raw.companyNameKana != null && raw.companyNameKana.length > 120) throw new Error(`${index + 1}件目の業者名よみがなが長すぎます。`);
+      if (raw.customPurchaseTarget != null && raw.customPurchaseTarget.length > 300) throw new Error(`${index + 1}件目のその他補足が長すぎます。`);
       if (raw.isFavorite != null && typeof raw.isFavorite !== "boolean") throw new Error(`${index + 1}件目のお気に入りが不正です。`);
       if (raw.isArchived != null && typeof raw.isArchived !== "boolean") throw new Error(`${index + 1}件目のアーカイブ状態が不正です。`);
       if (raw.archivedAt != null && !isValidIsoDateTime(raw.archivedAt)) throw new Error(`${index + 1}件目のarchivedAtが不正です。`);
@@ -707,8 +885,8 @@
       if (input.settings.sampleInitialized != null && typeof input.settings.sampleInitialized !== "boolean") {
         throw new Error("設定のsampleInitializedが不正です。");
       }
-      const areaOptions = uniqueStrings(input.settings.areaOptions || KCN.AREA_OPTIONS);
-      const propertyTypeOptions = uniqueStrings(input.settings.propertyTypeOptions || KCN.PROPERTY_TYPE_OPTIONS);
+      const areaOptions = normalizeAreaValues(input.settings.areaOptions || KCN.AREA_IDS);
+      const propertyTypeOptions = uniqueStrings(input.settings.propertyTypeOptions || KCN.PURCHASE_TARGET_IDS);
       if (!areaOptions.length || !propertyTypeOptions.length) throw new Error("設定候補が空です。");
       settings = {
         ...KCN.DEFAULT_SETTINGS,
@@ -716,6 +894,7 @@
         id: KCN.APP.settingsId,
         areaOptions,
         propertyTypeOptions,
+        defaultSort: input.settings.defaultSort === "temperature" ? "name" : (input.settings.defaultSort || "name"),
         schemaVersion: KCN.APP.schemaVersion
       };
     }
@@ -741,7 +920,10 @@
 
   Object.assign(KCN, {
     japaneseCollator,
+    katakanaToHiragana,
     normalizeText,
+    normalizeSearchText: normalizeText,
+    normalizeKana,
     cleanSingleLine,
     cleanMultiline,
     normalizeCompanyKey,
@@ -752,6 +934,14 @@
     isPlausibleEmail,
     mailtoHref,
     uniqueStrings,
+    normalizeAreaId,
+    normalizeAreaValues,
+    areaLabel,
+    expandAreaSelection,
+    normalizePurchaseTargetId,
+    purchaseTargetLabel,
+    expandPurchaseTargetSelection,
+    migrateLegacyPurchaseTargets,
     isValidIsoDateTime,
     isValidDateOnly,
     normalizeDateOnly,
@@ -763,8 +953,9 @@
     isoNow,
     formatDate,
     escapeHtml,
-    temperatureRank,
     normalizeCompany,
+    migrateStoredCompany,
+    serializeCompanyForBackup,
     normalizeCase,
     normalizeCaseResponse,
     companySearchHaystack,

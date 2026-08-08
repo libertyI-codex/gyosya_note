@@ -94,14 +94,14 @@ function envelope(overrides = {}) {
     assert.deepEqual(Array.from(validated.caseResponses[0].responseFactors), ["narrow-lot"]);
   });
 
-  await test("createBackupはschemaVersion 2と4データ領域", async () => {
+  await test("createBackupはschemaVersion 3と4データ領域", async () => {
     await K.db.initialize();
     await K.db.clearAllData();
     await K.db.putCompany(company());
     await K.db.putCase(caseRecord());
     await K.db.putCaseResponse(response());
     const backup = await K.db.createBackup();
-    assert.equal(backup.schemaVersion, 2);
+    assert.equal(backup.schemaVersion, 3);
     assert.equal(backup.companies.length, 1);
     assert.equal(backup.cases.length, 1);
     assert.equal(backup.caseResponses.length, 1);

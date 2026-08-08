@@ -109,6 +109,7 @@ async function openNew(page) {
 
 async function saveForm(page) {
   await page.locator("#save-company").click();
+  await page.waitForFunction(() => !KCN.app.state.form.saving);
 }
 
 async function searchNames(page) {
@@ -147,30 +148,35 @@ async function runFunctional(browser) {
     const value = await page.evaluate(() => KCN.app.state.companies.find((c) => c.companyName === "業者名だけテスト"));
     assert.ok(value);
     assert.deepEqual(value.areas, []);
-    assert.deepEqual(value.propertyTypes, []);
+    assert.deepEqual(value.purchaseTargetIds, []);
+    assert.equal(value.companyNameKana, "てすと");
   });
 
-  await check("全項目・複数エリア・複数対象・温度感・お気に入りを保存", async () => {
+  await check("全項目・よみがな・複数エリア・複数対象・補足・お気に入りを保存", async () => {
     await openNew(page);
     await page.locator("#company-name").fill("テスト総合買取");
+    await page.locator("#company-name-kana").fill("てすとそうごうかいとり");
     await page.locator("#contact-name").fill("山田 太郎");
     await page.locator("#company-phone").fill("045-123-4567");
     await page.locator("#company-email").fill("INFO@EXAMPLE.JP ");
     await page.locator('#form-area-chips .chip', { hasText: "横浜" }).click();
     await page.locator('#form-area-chips .chip', { hasText: "川崎" }).click();
     await page.locator("#custom-area").fill("横浜市南区中心");
-    await page.locator('#form-property-chips .chip[data-value="土地"]').click();
-    await page.locator('#form-property-chips .chip[data-value="戸建"]').click();
-    await page.locator('input[name="temperature"][value="積極的"]').check();
+    await page.locator('#form-property-chips .chip[data-value="land"]').click();
+    await page.locator('#form-property-chips .chip[data-value="detached-single-lot"]').click();
+    await page.locator('#form-property-chips .chip[data-value="other"]').click();
+    await page.locator("#custom-purchase-target").fill("ホテル・倉庫も相談可");
     await page.locator("#company-favorite").check();
     await page.locator("#company-memo").fill("決裁が早い。再建築不可も相談可。");
     await saveForm(page);
     await page.locator("#company-dialog").waitFor({ state: "hidden" });
     const value = await page.evaluate(() => KCN.app.state.companies.find((c) => c.companyName === "テスト総合買取"));
     assert.ok(value);
-    assert.deepEqual(value.areas, ["横浜", "川崎"]);
-    assert.deepEqual(value.propertyTypes, ["土地", "戸建"]);
-    assert.equal(value.temperature, "積極的");
+    assert.deepEqual(value.areas, ["yokohama", "kawasaki"]);
+    assert.deepEqual(value.purchaseTargetIds, ["land", "detached-single-lot", "other"]);
+    assert.equal(value.companyNameKana, "てすとそうごうかいとり");
+    assert.equal(value.customPurchaseTarget, "ホテル・倉庫も相談可");
+    assert.equal(Object.hasOwn(value, "temperature"), false);
     assert.equal(value.isFavorite, true);
     assert.equal(value.email, "info@example.jp");
   });
@@ -227,34 +233,30 @@ async function runFunctional(browser) {
   await check("エリア・対象・AND/OR検索", async () => {
     await resetSearch(page);
     await page.locator('#search-area-chips .chip', { hasText: "横浜" }).click();
-    await page.waitForFunction(() => document.activeElement?.dataset.value === "横浜");
+    await page.waitForFunction(() => document.activeElement?.dataset.value === "yokohama");
     assert.ok((await searchNames(page)).includes("テスト総合買取"));
     await resetSearch(page);
-    await page.locator('#search-property-chips .chip[data-value="土地"]').click();
+    await page.locator('#search-property-chips .chip[data-value="land"]').click();
     assert.ok((await searchNames(page)).includes("テスト総合買取"));
-    await page.locator('#search-property-chips .chip[data-value="ビル"]').click();
+    await page.locator('#search-property-chips .chip[data-value="building"]').click();
     assert.ok((await searchNames(page)).includes("テスト総合買取"));
     await resetSearch(page);
     await page.locator('#search-area-chips .chip', { hasText: "横浜" }).click();
-    await page.locator('#search-property-chips .chip[data-value="土地"]').click();
+    await page.locator('#search-property-chips .chip[data-value="land"]').click();
     assert.ok((await searchNames(page)).includes("テスト総合買取"));
   });
 
-  await check("業者名・担当者・メモ・電話検索", async () => {
-    for (const query of ["テスト総合買取", "山田 次郎", "再建築不可", "0451234567"]) {
+  await check("業者名・よみがな・担当者・メモ・補足・電話検索", async () => {
+    for (const query of ["テスト総合買取", "テストソウゴウ", "山田 次郎", "再建築不可", "ホテル", "0451234567"]) {
       await resetSearch(page);
       await page.locator("#search-query").fill(query);
       assert.ok((await searchNames(page)).includes("テスト総合買取"), query);
     }
   });
 
-  await check("お気に入り・積極的・条件解除", async () => {
+  await check("お気に入り・条件解除", async () => {
     await resetSearch(page);
     await page.locator('label[for="search-favorite-only"]').click();
-    assert.ok((await searchNames(page)).includes("テスト総合買取"));
-    assert.equal((await searchNames(page)).includes("業者名だけテスト"), false);
-    await resetSearch(page);
-    await page.locator('#search-temperature [data-temperature="積極的"]').click();
     assert.ok((await searchNames(page)).includes("テスト総合買取"));
     assert.equal((await searchNames(page)).includes("業者名だけテスト"), false);
     await resetSearch(page);
@@ -272,16 +274,16 @@ async function runFunctional(browser) {
     assert.equal(await minimal.locator('a[href^="mailto:"]').count(), 0);
   });
 
-  await check("業者名・お気に入り・温度感・更新日・登録日順", async () => {
+  await check("よみがな優先業者名・お気に入り・更新日・登録日順", async () => {
     await page.evaluate(async () => {
       await KCN.db.clearAllData();
       const base = {
-        contactName: "", phone: "", email: "", areas: [], customArea: "", propertyTypes: [], memo: "", isSample: false
+        contactName: "", phone: "", email: "", areas: [], customArea: "", purchaseTargetIds: [], memo: "", isSample: false
       };
       const rows = [
-        { id: "sort-a", companyName: "株式会社10", isFavorite: false, temperature: "現在休止", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-04T00:00:00.000Z" },
-        { id: "sort-b", companyName: "株式会社2", isFavorite: true, temperature: "通常", createdAt: "2026-08-04T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" },
-        { id: "sort-c", companyName: "株式会社1", isFavorite: false, temperature: "積極的", createdAt: "2026-08-02T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z" }
+        { id: "sort-a", companyName: "株式会社10", companyNameKana: "う", isFavorite: false, createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-04T00:00:00.000Z" },
+        { id: "sort-b", companyName: "株式会社2", companyNameKana: "い", isFavorite: true, createdAt: "2026-08-04T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" },
+        { id: "sort-c", companyName: "株式会社1", companyNameKana: "あ", isFavorite: false, createdAt: "2026-08-02T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z" }
       ];
       for (const row of rows) await KCN.db.putCompany({ ...base, ...row });
       await KCN.app.reloadData();
@@ -291,8 +293,6 @@ async function runFunctional(browser) {
     assert.deepEqual(await listNames(page), ["株式会社1", "株式会社2", "株式会社10"]);
     await page.locator('#list-sort').selectOption("favorite");
     assert.equal((await listNames(page))[0], "株式会社2");
-    await page.locator('#list-sort').selectOption("temperature");
-    assert.equal((await listNames(page))[0], "株式会社1");
     await page.locator('#list-sort').selectOption("updated");
     assert.equal((await listNames(page))[0], "株式会社10");
     await page.locator('#list-sort').selectOption("created");
@@ -310,7 +310,9 @@ async function runFunctional(browser) {
     const jsonPath = await jsonDownload.path();
     const backup = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
     assert.equal(backup.format, "kaitori-company-note-backup");
+    assert.equal(backup.schemaVersion, 3);
     assert.equal(backup.companies.length, 3);
+    assert.equal(backup.companies.every((company) => !Object.hasOwn(company, "temperature") && !Object.hasOwn(company, "propertyTypes")), true);
     assert.ok(backup.settings);
 
     const [csvDownload] = await Promise.all([
@@ -321,7 +323,8 @@ async function runFunctional(browser) {
     const csv = fs.readFileSync(csvPath);
     assert.deepEqual([...csv.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
     const csvText = csv.toString("utf8");
-    assert.ok(csvText.includes('"業者名","担当者名","電話番号"'));
+    assert.ok(csvText.includes('"業者名","業者名よみがな","担当者名","電話番号"'));
+    assert.equal(csvText.split("\r\n")[0].includes("温度感"), false);
     assert.ok(csvText.includes("\r\n"));
   });
 
@@ -341,7 +344,7 @@ async function runFunctional(browser) {
       appVersion: KCN.APP.version,
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
-      companies: [KCN.normalizeCompany({ id: "restore-add", companyName: "追加復元業者", temperature: "通常" })],
+      companies: [{ id: "restore-add", companyName: "追加復元業者", companyNameKana: "ついかふくげんぎょうしゃ", temperature: "通常" }],
       settings: KCN.app.state.settings
     }));
     await page.locator("#restore-file-input").setInputFiles({ name: "add.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(payload)) });
@@ -360,7 +363,7 @@ async function runFunctional(browser) {
       appVersion: KCN.APP.version,
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
-      companies: [KCN.normalizeCompany({ id: "restore-only", companyName: "置換業者", phone: "03-5555-0000", temperature: "通常" })],
+      companies: [{ id: "restore-only", companyName: "置換業者", companyNameKana: "ちかんぎょうしゃ", phone: "03-5555-0000", temperature: "通常" }],
       settings: KCN.app.state.settings
     }));
     await page.locator("#restore-file-input").setInputFiles({ name: "replace.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(payload)) });
@@ -412,7 +415,7 @@ async function runResponsive(browser) {
     await KCN.db.putCompany(KCN.normalizeCompany({
       id: "long-name",
       companyName: "とても長い業者名でもレイアウトを壊さないことを確認するためのサンプル株式会社横浜不動産買取センター",
-      areas: ["横浜"], propertyTypes: ["土地"], temperature: "積極的", isFavorite: true
+      areas: ["yokohama"], purchaseTargetIds: ["land"], isFavorite: true
     }));
     await KCN.app.reloadData();
   });
@@ -557,8 +560,8 @@ async function runPwa(browser) {
   await check("オフライン再起動・IndexedDBデータ保持", async () => {
     await page.evaluate(async () => {
       await KCN.db.clearAllData();
-      await KCN.db.putCompany(KCN.normalizeCompany({ id: "offline-company", companyName: "オフライン業者", areas: ["横浜"], propertyTypes: ["土地"], temperature: "積極的" }));
-      await KCN.db.putCase(KCN.normalizeCase({ id: "offline-case", caseName: "オフライン案件", area: "横浜", caseType: "land" }));
+      await KCN.db.putCompany(KCN.normalizeCompany({ id: "offline-company", companyName: "オフライン業者", companyNameKana: "おふらいんぎょうしゃ", areas: ["yokohama"], purchaseTargetIds: ["land"] }));
+      await KCN.db.putCase(KCN.normalizeCase({ id: "offline-case", caseName: "オフライン案件", area: "yokohama", caseType: "land" }));
       await KCN.db.putCaseResponse(KCN.normalizeCaseResponse({ id: "offline-response", caseId: "offline-case", companyId: "offline-company", responseStatus: "回答待ち" }));
       await KCN.app.reloadData();
     });
@@ -587,10 +590,10 @@ async function runPwa(browser) {
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.waitForFunction(async () => {
       const names = await caches.keys();
-      return names.includes("kaitori-company-note-v1-prototype2") && !names.includes("kaitori-company-note-v1-prototype1") && !names.includes("kaitori-company-note-v0-test");
+      return names.includes("kaitori-company-note-v1-prototype3") && !names.includes("kaitori-company-note-v1-prototype2") && !names.includes("kaitori-company-note-v1-prototype1") && !names.includes("kaitori-company-note-v0-test");
     });
     const names = await page.evaluate(() => caches.keys());
-    assert.ok(names.includes("kaitori-company-note-v1-prototype2"));
+    assert.ok(names.includes("kaitori-company-note-v1-prototype3"));
     assert.equal(names.includes("kaitori-company-note-v1-prototype1"), false);
     assert.equal(names.includes("kaitori-company-note-v0-test"), false);
     assert.equal(names.includes("unrelated-app-cache"), true);

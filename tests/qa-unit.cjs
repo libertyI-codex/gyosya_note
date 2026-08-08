@@ -52,10 +52,9 @@ function company(overrides = {}) {
     contactName: "山田 太郎",
     phone: "045-123-4567",
     email: "INFO@EXAMPLE.JP",
-    areas: ["横浜"],
+    areas: ["yokohama"],
     customArea: "横浜市南区中心",
-    propertyTypes: ["土地", "戸建"],
-    temperature: "積極的",
+    purchaseTargetIds: ["land", "detached-single-lot"],
     isFavorite: true,
     memo: "再建築不可も相談可",
     createdAt: "2026-08-01T00:00:00.000Z",
@@ -122,31 +121,29 @@ test("電話番号は記号なしで検索", () => {
   assert.equal(K.matchesCompany(company(), { query: "045-123-4567" }), true);
 });
 
-test("お気に入りと温度感の絞り込み", () => {
+test("お気に入りだけの絞り込み", () => {
   const c = company();
-  assert.equal(K.matchesCompany(c, { favoriteOnly: true, temperature: "積極的" }), true);
-  assert.equal(K.matchesCompany(c, { favoriteOnly: true, temperature: "通常" }), false);
+  assert.equal(K.matchesCompany(c, { favoriteOnly: true }), true);
   assert.equal(K.matchesCompany(company({ isFavorite: false }), { favoriteOnly: true }), false);
 });
 
-test("検索結果はお気に入り・温度感・日本語名順", () => {
+test("検索結果はお気に入り・よみがな優先の日本語名順", () => {
   const list = [
-    company({ id: "3", companyName: "青空", isFavorite: false, temperature: "積極的" }),
-    company({ id: "2", companyName: "赤坂", isFavorite: true, temperature: "通常" }),
-    company({ id: "1", companyName: "青木", isFavorite: true, temperature: "積極的" })
+    company({ id: "3", companyName: "青空", companyNameKana: "あおぞら", isFavorite: false }),
+    company({ id: "2", companyName: "赤坂", companyNameKana: "あかさか", isFavorite: true }),
+    company({ id: "1", companyName: "青木", companyNameKana: "あおき", isFavorite: true })
   ].sort((a, b) => K.compareCompanies(a, b, "search"));
   assert.deepEqual(Array.from(list, (item) => item.id), ["1", "2", "3"]);
 });
 
 test("一覧の各並び替え", () => {
   const list = [
-    company({ id: "a", companyName: "株式会社10", isFavorite: false, temperature: "現在休止", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z" }),
-    company({ id: "b", companyName: "株式会社2", isFavorite: true, temperature: "通常", createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" }),
-    company({ id: "c", companyName: "株式会社1", isFavorite: false, temperature: "積極的", createdAt: "2026-08-02T00:00:00.000Z", updatedAt: "2026-08-02T00:00:00.000Z" })
+    company({ id: "a", companyName: "株式会社10", isFavorite: false, createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-03T00:00:00.000Z" }),
+    company({ id: "b", companyName: "株式会社2", isFavorite: true, createdAt: "2026-08-03T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" }),
+    company({ id: "c", companyName: "株式会社1", isFavorite: false, createdAt: "2026-08-02T00:00:00.000Z", updatedAt: "2026-08-02T00:00:00.000Z" })
   ];
   assert.deepEqual(Array.from([...list].sort((a, b) => K.compareCompanies(a, b, "name")), (x) => x.id), ["c", "b", "a"]);
   assert.equal([...list].sort((a, b) => K.compareCompanies(a, b, "favorite"))[0].id, "b");
-  assert.equal([...list].sort((a, b) => K.compareCompanies(a, b, "temperature"))[0].id, "c");
   assert.equal([...list].sort((a, b) => K.compareCompanies(a, b, "updated"))[0].id, "a");
   assert.equal([...list].sort((a, b) => K.compareCompanies(a, b, "created"))[0].id, "b");
 });
@@ -185,7 +182,7 @@ test("不正JSON構造を拒否", () => {
   assert.throws(() => K.validateBackup(backup({ companies: [{ id: "x", companyName: 123 }] })));
   assert.throws(() => K.validateBackup(backup({ companies: [company({ id: "same" }), company({ id: "same" })] })));
   assert.throws(() => K.validateBackup(backup({ companies: [company({ id: "same" }), company({ id: " same " })] })));
-  assert.throws(() => K.validateBackup(backup({ schemaVersion: 2 })));
+  assert.throws(() => K.validateBackup(backup({ schemaVersion: 4 })));
   assert.throws(() => K.validateBackup(backup({ settings: { defaultSort: "unknown" } })));
   assert.throws(() => K.validateBackup(backup({ settings: { areaOptions: [], propertyTypeOptions: ["土地"] } })));
 });
@@ -193,7 +190,7 @@ test("不正JSON構造を拒否", () => {
 test("CSVはUTF-8 BOM・指定列・引用符・改行・数式対策", () => {
   const csv = K.buildCsv([company({ companyName: '=HYPERLINK("x")', memo: 'カンマ, 引用符"\n改行' })]);
   assert.equal(csv.charCodeAt(0), 0xfeff);
-  assert.match(csv, /^\uFEFF"業者名","担当者名","電話番号","メール","買取エリア","買取対象","温度感","お気に入り","メモ","登録日","更新日"\r\n/);
+  assert.match(csv, /^\uFEFF"業者名","業者名よみがな","担当者名","電話番号","メール","買取エリア","買取対象","その他補足","お気に入り","メモ","登録日","更新日"\r\n/);
   assert.ok(csv.includes("'=HYPERLINK("));
   assert.ok(csv.includes('引用符""'));
   assert.ok(csv.includes("\n改行"));
@@ -202,6 +199,8 @@ test("CSVはUTF-8 BOM・指定列・引用符・改行・数式対策", () => {
 test("サンプルは3社で識別可能", () => {
   assert.equal(K.SAMPLE_COMPANIES.length, 3);
   assert.equal(K.SAMPLE_COMPANIES.every((item) => item.isSample && item.companyName.includes("サンプル")), true);
+  assert.equal(K.SAMPLE_COMPANIES.every((item) => !Object.hasOwn(item, "temperature")), true);
+  assert.equal(K.SAMPLE_COMPANIES.every((item) => Array.isArray(item.purchaseTargetIds)), true);
 });
 
 console.log(`UNIT RESULT: ${passed} tests passed`);

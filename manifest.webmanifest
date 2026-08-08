@@ -1,6 +1,7 @@
 {
   "name": "買取業者ノート",
   "short_name": "買取ノート",
+  "version": "1.0.0-prototype.3",
   "description": "買取業者の検索と、案件概要・各社回答を端末内へ手早く記録するオフライン対応アプリ",
   "lang": "ja",
   "id": "./index.html",

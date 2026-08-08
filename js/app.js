@@ -2,29 +2,38 @@
   "use strict";
 
   const KCN = global.KCN;
+  const ROUTES = Object.freeze({
+    search: "screen-search",
+    cases: "screen-cases",
+    list: "screen-list",
+    other: "screen-other"
+  });
   const state = {
     companies: [],
     settings: null,
     currentScreen: "search",
     search: {
       areas: new Set(),
-      propertyTypes: new Set(),
-      temperature: "すべて",
+      purchaseTargetIds: new Set(),
       favoriteOnly: false,
       query: ""
     },
     list: {
       query: "",
       favoriteOnly: false,
-      temperature: "すべて",
       area: "",
-      propertyType: "",
+      purchaseTargetId: "",
       sort: "name"
     },
     form: {
       mode: "new",
       areas: new Set(),
-      propertyTypes: new Set(),
+      purchaseTargetIds: new Set(),
+      kanaManuallyEdited: false,
+      kanaAutoCandidate: false,
+      kanaInternalUpdate: false,
+      composing: false,
+      compositionReading: "",
       dirty: false,
       saving: false,
       formatBypassSignature: "",
@@ -38,6 +47,8 @@
     reopenFormAfterDetail: false,
     lastFocus: new Map(),
     suppressFocusRestore: new Set(),
+    modalScrollY: 0,
+    routeChangeCount: 0,
     initialized: false
   };
 
@@ -49,33 +60,66 @@
 
   function cacheDom() {
     [
-      "fatal-error", "connection-status", "screen-search", "screen-list", "screen-other",
-      "search-area-chips", "search-property-chips", "search-temperature", "search-favorite-only", "search-query",
+      "fatal-error", "connection-status", "screen-search", "screen-cases", "screen-list", "screen-other",
+      "search-area-chips", "search-property-chips", "search-favorite-only", "search-query",
       "clear-search", "search-results", "search-result-count", "company-list", "list-query", "list-sort",
-      "list-favorite-only", "list-temperature", "list-area", "list-property-type", "clear-list-filters",
+      "list-favorite-only", "list-area", "list-property-type", "clear-list-filters",
       "list-active-filter-count", "list-count-badge", "list-summary", "add-company-fab", "add-fab-label",
-      "stat-total", "stat-favorite", "stat-active", "stat-paused", "storage-mode-label",
+      "stat-total", "stat-favorite", "storage-mode-label",
       "export-json", "choose-restore-file", "restore-file-input", "export-csv", "open-option-settings",
       "delete-samples", "delete-all-data", "company-dialog", "company-form", "company-dialog-mode",
-      "company-dialog-title", "company-id", "company-created-at", "company-name", "contact-name", "company-phone",
-      "company-email", "custom-area", "form-area-chips", "form-property-chips", "company-favorite", "company-memo",
+      "company-dialog-title", "company-id", "company-created-at", "company-name", "company-name-kana", "company-kana-hint", "contact-name", "company-phone",
+      "company-email", "custom-area", "form-area-chips", "form-property-chips", "custom-purchase-target-field", "custom-purchase-target", "company-favorite", "company-memo",
       "memo-count", "form-error", "form-warning", "duplicate-warning", "duplicate-list", "continue-duplicate-save",
       "detail-dialog", "detail-dialog-title", "detail-content", "detail-footer", "restore-dialog", "restore-form",
       "restore-file-summary", "restore-error", "option-dialog", "option-form", "area-options-text",
-      "property-options-text", "option-error", "reset-options", "loading-overlay", "loading-message",
+      "property-options-summary", "option-error", "reset-options", "loading-overlay", "loading-message",
       "toast", "toast-message", "toast-action", "toast-close"
     ].forEach((id) => {
       dom[id] = byId(id);
     });
   }
 
+  function updateVisualViewportHeight() {
+    const height = global.visualViewport ? global.visualViewport.height : global.innerHeight;
+    if (Number.isFinite(height) && height > 0) {
+      document.documentElement.style.setProperty("--visual-viewport-height", `${Math.round(height)}px`);
+    }
+  }
+
+  function lockBodyScroll() {
+    if (document.body.classList.contains("has-dialog-open")) return;
+    state.modalScrollY = Math.max(0, global.scrollY || document.documentElement.scrollTop || 0);
+    document.body.style.top = `-${state.modalScrollY}px`;
+    document.body.classList.add("has-dialog-open");
+  }
+
+  function unlockBodyScroll() {
+    if (!document.body.classList.contains("has-dialog-open")) return;
+    const scrollY = state.modalScrollY;
+    document.body.classList.remove("has-dialog-open");
+    document.body.style.top = "";
+    state.modalScrollY = 0;
+    try { global.scrollTo(0, scrollY); } catch (error) { document.documentElement.scrollTop = scrollY; }
+  }
+
+  function syncBodyScrollLock() {
+    const hasOpenModal = Array.from(document.querySelectorAll("dialog[open]")).some((dialog) => dialog !== dom["loading-overlay"] || dialog.open);
+    if (hasOpenModal) lockBodyScroll();
+    else unlockBodyScroll();
+  }
+
   function setLoading(visible, message) {
     dom["loading-message"].textContent = message || "処理中";
     if (visible && !dom["loading-overlay"].open) {
       dom["loading-overlay"].showModal();
+      syncBodyScrollLock();
       dom["loading-overlay"].focus({ preventScroll: true });
     }
-    if (!visible && dom["loading-overlay"].open) dom["loading-overlay"].close();
+    if (!visible && dom["loading-overlay"].open) {
+      dom["loading-overlay"].close();
+      syncBodyScrollLock();
+    }
   }
 
   function ensureButtonLabels(root) {
@@ -113,7 +157,12 @@
   function openDialog(dialog, focusTarget) {
     if (!dialog) return;
     if (!state.lastFocus.has(dialog.id)) state.lastFocus.set(dialog.id, document.activeElement);
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      const body = dialog.querySelector(".dialog-body");
+      if (body) body.scrollTop = 0;
+      dialog.showModal();
+      syncBodyScrollLock();
+    }
     requestAnimationFrame(() => {
       const target = focusTarget || dialog.querySelector("button, input, select, textarea, [href]");
       if (target) target.focus({ preventScroll: true });
@@ -133,6 +182,7 @@
     }
     if (opts.force && dialog === dom["company-dialog"]) state.form.dirty = false;
     dialog.close();
+    syncBodyScrollLock();
     return true;
   }
 
@@ -158,16 +208,20 @@
     }
   }
 
-  function switchScreen(name) {
-    if (!['search', 'cases', 'list', 'other'].includes(name)) return;
+  function navigate(name, options) {
+    if (!Object.prototype.hasOwnProperty.call(ROUTES, name)) return false;
+    const opts = options || {};
     state.currentScreen = name;
-    document.querySelectorAll(".screen[data-screen]").forEach((section) => {
-      const active = section.dataset.screen === name;
+    Object.entries(ROUTES).forEach(([route, screenId]) => {
+      const section = byId(screenId);
+      if (!section) return;
+      const active = route === name;
       section.hidden = !active;
       section.classList.toggle("is-active", active);
+      section.setAttribute("aria-hidden", String(!active));
     });
-    document.querySelectorAll("[data-nav]").forEach((button) => {
-      const active = button.dataset.nav === name;
+    document.querySelectorAll(".bottom-nav [data-route]").forEach((button) => {
+      const active = button.dataset.route === name;
       button.classList.toggle("is-active", active);
       if (active) button.setAttribute("aria-current", "page");
       else button.removeAttribute("aria-current");
@@ -177,55 +231,132 @@
     dom["add-company-fab"].setAttribute("aria-label", fabLabel);
     dom["add-company-fab"].setAttribute("title", fabLabel);
     if (dom["add-fab-label"]) dom["add-fab-label"].textContent = name === "cases" ? "案件登録" : "業者登録";
-    if (name === "cases" && KCN.caseUI) KCN.caseUI.renderAll();
-    if (name === "list") renderCompanyList();
-    if (name === "other") renderStats();
-    global.scrollTo({ top: 0, behavior: "auto" });
+    try {
+      if (name === "cases" && KCN.caseUI) KCN.caseUI.renderAll();
+      if (name === "list") renderCompanyList();
+      if (name === "other") renderStats();
+    } catch (error) {
+      showToast("画面の再描画に失敗しました。再読み込みしてください。");
+    }
+    const hash = `#${name}`;
+    if (opts.history !== "none" && global.history && global.location.hash !== hash) {
+      const method = opts.history === "replace" ? "replaceState" : "pushState";
+      global.history[method]({ kcnRoute: name }, "", hash);
+    }
+    state.routeChangeCount += 1;
+    global.dispatchEvent(new CustomEvent("kcn:routechange", { detail: { route: name, count: state.routeChangeCount } }));
+    try { global.scrollTo(0, 0); } catch (error) { document.documentElement.scrollTop = 0; }
+    return true;
+  }
+
+  const switchScreen = navigate;
+
+  function optionId(option) {
+    return typeof option === "object" && option ? String(option.id || "") : String(option || "");
+  }
+
+  function optionLabel(option) {
+    if (typeof option === "object" && option) return String(option.label || option.id || "");
+    const value = String(option || "");
+    if (KCN.areaLabel) return KCN.areaLabel(value);
+    return value;
+  }
+
+  function areaOptions() {
+    const core = Array.isArray(KCN.AREA_OPTIONS) ? KCN.AREA_OPTIONS : [];
+    const extras = (state.settings && Array.isArray(state.settings.areaOptions) ? state.settings.areaOptions : [])
+      .map((option) => ({ id: optionId(option), label: optionLabel(option) }))
+      .filter((option) => option.id);
+    const seen = new Set();
+    return [...core, ...extras].map((option) => ({ id: optionId(option), label: optionLabel(option) }))
+      .filter((option) => option.id && !seen.has(option.id) && seen.add(option.id));
+  }
+
+  function purchaseTargetGroups() {
+    const factorGroups = KCN.FACTOR_CATEGORIES || KCN.CASE_FACTOR_GROUPS || [];
+    return [
+      { id: "bulk", label: "一括選択", options: [{ id: "all", label: "全て" }] },
+      { id: "case-types", label: "案件種別", options: KCN.CASE_TYPE_OPTIONS || KCN.CASE_TYPES || [] },
+      ...factorGroups.map((group) => ({
+        id: group.id || group.categoryId,
+        label: `個別要因：${group.label || group.categoryLabel}`,
+        options: group.options || []
+      }))
+    ];
+  }
+
+  function purchaseTargetOptions() {
+    return purchaseTargetGroups().flatMap((group) => group.options || []);
+  }
+
+  function purchaseTargetLabel(id) {
+    if (id === "all") return "全て";
+    const option = purchaseTargetOptions().find((item) => optionId(item) === id);
+    if (option) return optionLabel(option);
+    if (KCN.purchaseTargetLabel) return KCN.purchaseTargetLabel(id);
+    return String(id || "");
   }
 
   function renderChipButtons(container, options, selected, scope) {
     const fragment = document.createDocumentFragment();
     (options || []).forEach((option) => {
       const button = document.createElement("button");
-      const isSelected = selected.has(option);
+      const value = optionId(option);
+      const label = optionLabel(option);
+      const isSelected = selected.has(value);
       button.type = "button";
       button.className = `chip${isSelected ? " is-selected" : ""}`;
       button.dataset.chipScope = scope;
-      button.dataset.value = option;
+      button.dataset.value = value;
       button.setAttribute("aria-pressed", String(isSelected));
-      button.setAttribute("aria-label", option);
-      button.textContent = option;
+      button.setAttribute("aria-label", label);
+      button.textContent = label;
       fragment.appendChild(button);
     });
     container.replaceChildren(fragment);
   }
 
+  function renderPurchaseTargetCatalog(container, selected, scope) {
+    const fragment = document.createDocumentFragment();
+    purchaseTargetGroups().forEach((group) => {
+      const section = document.createElement("section");
+      section.className = "purchase-target-group";
+      const heading = document.createElement("h4");
+      heading.textContent = group.label;
+      const chips = document.createElement("div");
+      chips.className = "chip-group";
+      renderChipButtons(chips, group.options, selected, scope);
+      section.append(heading, chips);
+      fragment.appendChild(section);
+    });
+    container.replaceChildren(fragment);
+  }
+
   function renderAllOptionControls() {
-    const settings = state.settings || KCN.DEFAULT_SETTINGS;
-    const allowedAreas = new Set(settings.areaOptions);
-    const allowedPropertyTypes = new Set(settings.propertyTypeOptions);
+    const areas = areaOptions();
+    const allowedAreas = new Set(areas.map(optionId));
+    const allowedTargets = new Set(purchaseTargetOptions().map(optionId));
     state.search.areas = new Set([...state.search.areas].filter((value) => allowedAreas.has(value)));
-    state.search.propertyTypes = new Set([...state.search.propertyTypes].filter((value) => allowedPropertyTypes.has(value)));
-    renderChipButtons(dom["search-area-chips"], settings.areaOptions, state.search.areas, "search-areas");
-    renderChipButtons(dom["search-property-chips"], settings.propertyTypeOptions, state.search.propertyTypes, "search-property-types");
+    state.search.purchaseTargetIds = new Set([...state.search.purchaseTargetIds].filter((value) => value === "all" || allowedTargets.has(value)));
+    renderChipButtons(dom["search-area-chips"], areas, state.search.areas, "search-areas");
+    renderPurchaseTargetCatalog(dom["search-property-chips"], state.search.purchaseTargetIds, "search-purchase-targets");
 
     const listAreaValue = state.list.area;
     dom["list-area"].replaceChildren(new Option("すべて", ""));
-    settings.areaOptions.forEach((option) => dom["list-area"].add(new Option(option, option)));
-    dom["list-area"].value = settings.areaOptions.includes(listAreaValue) ? listAreaValue : "";
+    areas.forEach((option) => dom["list-area"].add(new Option(option.label, option.id)));
+    dom["list-area"].value = allowedAreas.has(listAreaValue) ? listAreaValue : "";
     state.list.area = dom["list-area"].value;
 
-    const listTypeValue = state.list.propertyType;
+    const listTypeValue = state.list.purchaseTargetId;
     dom["list-property-type"].replaceChildren(new Option("すべて", ""));
-    settings.propertyTypeOptions.forEach((option) => dom["list-property-type"].add(new Option(option, option)));
-    dom["list-property-type"].value = settings.propertyTypeOptions.includes(listTypeValue) ? listTypeValue : "";
-    state.list.propertyType = dom["list-property-type"].value;
-  }
-
-  function selectedTemperatureClass(temperature) {
-    if (temperature === KCN.TEMPERATURES.ACTIVE) return "active";
-    if (temperature === KCN.TEMPERATURES.PAUSED) return "paused";
-    return "normal";
+    purchaseTargetGroups().filter((group) => group.id !== "bulk").forEach((group) => {
+      const optgroup = document.createElement("optgroup");
+      optgroup.label = group.label;
+      (group.options || []).forEach((option) => optgroup.appendChild(new Option(optionLabel(option), optionId(option))));
+      dom["list-property-type"].appendChild(optgroup);
+    });
+    dom["list-property-type"].value = allowedTargets.has(listTypeValue) ? listTypeValue : "";
+    state.list.purchaseTargetId = dom["list-property-type"].value;
   }
 
   function tagsHtml(values, limit) {
@@ -246,7 +377,9 @@
   function companyCardHtml(company, context) {
     const phoneLink = KCN.isPlausiblePhone(company.phone) ? KCN.phoneHref(company.phone) : "";
     const mailLink = KCN.mailtoHref(company.email, "買取案件のご相談");
-    const areas = [...(company.areas || []), company.customArea].filter(Boolean);
+    const areas = [...(company.areas || []).map((area) => KCN.areaLabel ? KCN.areaLabel(area) : area), company.customArea].filter(Boolean);
+    const targetIds = (company.purchaseTargetIds || []).filter((id) => id !== "all");
+    const targets = [...targetIds.map(purchaseTargetLabel), ...(company.legacyPurchaseTargets || [])].filter(Boolean);
     const favoriteLabel = company.isFavorite ? "お気に入りから外す" : "お気に入りに追加";
     let actions = "";
     if (context === "search") {
@@ -258,25 +391,25 @@
     } else {
       const actionItems = [];
       if (phoneLink) actionItems.push(`<a class="card-action" href="${KCN.escapeHtml(phoneLink)}" aria-label="${KCN.escapeHtml(company.companyName)}へ電話">${actionIcon("phone")}<span>電話</span></a>`);
+      if (mailLink) actionItems.push(`<a class="card-action" href="${KCN.escapeHtml(mailLink)}" aria-label="${KCN.escapeHtml(company.companyName)}へメール">${actionIcon("mail")}<span>メール</span></a>`);
       actionItems.push(`<button type="button" class="card-action card-action--detail" data-detail-id="${KCN.escapeHtml(company.id)}" aria-label="${KCN.escapeHtml(company.companyName)}の詳細">${actionIcon("detail")}<span>詳細</span></button>`);
       actions = `<div class="company-card__actions${actionItems.length === 1 ? " company-card__actions--one" : actionItems.length === 2 ? " company-card__actions--two" : ""}">${actionItems.join("")}</div>`;
     }
     return `
-      <article class="company-card" data-company-id="${KCN.escapeHtml(company.id)}" data-temperature="${KCN.escapeHtml(company.temperature)}">
+      <article class="company-card" data-company-id="${KCN.escapeHtml(company.id)}">
         <div class="company-card__header">
           <div class="company-card__heading">
             <h4>${KCN.escapeHtml(company.companyName)}</h4>
+            ${company.companyNameKana ? `<p class="company-name-kana">${KCN.escapeHtml(company.companyNameKana)}</p>` : ""}
             <p>${company.contactName ? `担当：${KCN.escapeHtml(company.contactName)}` : "担当者 未登録"}</p>
           </div>
           <button type="button" class="favorite-button" data-favorite-id="${KCN.escapeHtml(company.id)}" aria-label="${KCN.escapeHtml(favoriteLabel)}" aria-pressed="${company.isFavorite}" title="${KCN.escapeHtml(favoriteLabel)}">${company.isFavorite ? "★" : "☆"}</button>
         </div>
-        <div class="card-status-row">
-          <span class="temperature-badge temperature-badge--${selectedTemperatureClass(company.temperature)}">${KCN.escapeHtml(company.temperature)}</span>
-          ${company.isSample ? '<span class="sample-badge">サンプル</span>' : ""}
-        </div>
+        ${company.isSample ? '<div class="card-status-row"><span class="sample-badge">サンプル</span></div>' : ""}
         <div class="card-meta">
           <div class="meta-row"><span class="meta-label">エリア</span><div class="tag-list">${tagsHtml(areas, 3)}</div></div>
-          <div class="meta-row"><span class="meta-label">買取対象</span><div class="tag-list">${tagsHtml(company.propertyTypes, 3)}</div></div>
+          <div class="meta-row"><span class="meta-label">買取対象</span><div class="tag-list">${tagsHtml(targets, 3)}</div></div>
+          ${company.customPurchaseTarget ? '<div class="meta-row"><span class="meta-label">その他補足</span><div class="tag-list"><span class="tag">登録あり</span></div></div>' : ""}
         </div>
         ${actions}
       </article>`;
@@ -290,8 +423,7 @@
   function getSearchResults() {
     const filters = {
       areas: [...state.search.areas],
-      propertyTypes: [...state.search.propertyTypes],
-      temperature: state.search.temperature,
+      purchaseTargetIds: [...state.search.purchaseTargetIds].filter((id) => id !== "all"),
       favoriteOnly: state.search.favoriteOnly,
       query: state.search.query
     };
@@ -313,15 +445,12 @@
   }
 
   function getListResults() {
-    const query = KCN.normalizeText(state.list.query);
     return state.companies.filter((company) => !company.isArchived).filter((company) => {
-      if (query && !KCN.normalizeText(company.companyName).includes(query)) return false;
       return KCN.matchesCompany(company, {
         areas: state.list.area ? [state.list.area] : [],
-        propertyTypes: state.list.propertyType ? [state.list.propertyType] : [],
-        temperature: state.list.temperature,
+        purchaseTargetIds: state.list.purchaseTargetId ? [state.list.purchaseTargetId] : [],
         favoriteOnly: state.list.favoriteOnly,
-        query: ""
+        query: state.list.query
       });
     }).sort((a, b) => KCN.compareCompanies(a, b, state.list.sort));
   }
@@ -329,7 +458,7 @@
   function renderCompanyList() {
     const results = getListResults();
     const filterCount = Number(Boolean(state.list.query)) + Number(state.list.favoriteOnly)
-      + Number(state.list.temperature !== "すべて") + Number(Boolean(state.list.area)) + Number(Boolean(state.list.propertyType));
+      + Number(Boolean(state.list.area)) + Number(Boolean(state.list.purchaseTargetId));
     dom["list-active-filter-count"].textContent = filterCount ? `（${filterCount}件）` : "";
     dom["list-count-badge"].textContent = `${results.length}社`;
     const activeCompanies = state.companies.filter((company) => !company.isArchived);
@@ -348,8 +477,6 @@
     const activeCompanies = state.companies.filter((company) => !company.isArchived);
     dom["stat-total"].textContent = activeCompanies.length;
     dom["stat-favorite"].textContent = activeCompanies.filter((company) => company.isFavorite).length;
-    dom["stat-active"].textContent = activeCompanies.filter((company) => company.temperature === KCN.TEMPERATURES.ACTIVE).length;
-    dom["stat-paused"].textContent = activeCompanies.filter((company) => company.temperature === KCN.TEMPERATURES.PAUSED).length;
     dom["storage-mode-label"].textContent = KCN.db.getStorageMode() === "indexeddb" ? "IndexedDB・端末内保存" : "端末内保存（互換モード）";
   }
 
@@ -378,17 +505,11 @@
 
   function clearSearchFilters() {
     state.search.areas.clear();
-    state.search.propertyTypes.clear();
-    state.search.temperature = "すべて";
+    state.search.purchaseTargetIds.clear();
     state.search.favoriteOnly = false;
     state.search.query = "";
     dom["search-favorite-only"].checked = false;
     dom["search-query"].value = "";
-    document.querySelectorAll("#search-temperature [data-temperature]").forEach((button) => {
-      const selected = button.dataset.temperature === "すべて";
-      button.classList.toggle("is-selected", selected);
-      button.setAttribute("aria-pressed", String(selected));
-    });
     renderAllOptionControls();
     renderSearchResults();
   }
@@ -396,12 +517,10 @@
   function clearListFilters() {
     state.list.query = "";
     state.list.favoriteOnly = false;
-    state.list.temperature = "すべて";
     state.list.area = "";
-    state.list.propertyType = "";
+    state.list.purchaseTargetId = "";
     dom["list-query"].value = "";
     dom["list-favorite-only"].checked = false;
-    dom["list-temperature"].value = "すべて";
     dom["list-area"].value = "";
     dom["list-property-type"].value = "";
     renderCompanyList();
@@ -420,10 +539,49 @@
   }
 
   function renderFormChips() {
-    const areaOptions = KCN.uniqueStrings([...(state.settings.areaOptions || []), ...state.form.areas]);
-    const typeOptions = KCN.uniqueStrings([...(state.settings.propertyTypeOptions || []), ...state.form.propertyTypes]);
-    renderChipButtons(dom["form-area-chips"], areaOptions, state.form.areas, "form-areas");
-    renderChipButtons(dom["form-property-chips"], typeOptions, state.form.propertyTypes, "form-property-types");
+    const options = areaOptions();
+    const knownAreas = new Set(options.map(optionId));
+    const selectedUnknown = [...state.form.areas].filter((id) => !knownAreas.has(id)).map((id) => ({ id, label: KCN.areaLabel ? KCN.areaLabel(id) : id }));
+    renderChipButtons(dom["form-area-chips"], [...options, ...selectedUnknown], state.form.areas, "form-areas");
+    renderPurchaseTargetCatalog(dom["form-property-chips"], state.form.purchaseTargetIds, "form-purchase-targets");
+    dom["custom-purchase-target-field"].hidden = !state.form.purchaseTargetIds.has("other");
+  }
+
+  function katakanaToHiragana(value) {
+    if (KCN.katakanaToHiragana) return KCN.katakanaToHiragana(value);
+    return String(value || "").normalize("NFKC").replace(/[ァ-ヶヽヾ]/g, (character) => String.fromCharCode(character.charCodeAt(0) - 0x60));
+  }
+
+  function safeImeReading(value) {
+    const source = String(value || "").normalize("NFKC").trim();
+    if (!source || !/[ぁ-ゖァ-ヶ]/.test(source) || /[㐀-龯豈-﫿々〆]/.test(source)) return "";
+    const reading = katakanaToHiragana(source).replace(/\s+/g, " ").trim();
+    return /^[ぁ-ゖー\s・･A-Za-z0-9０-９&＆()（）.．・]+$/.test(reading) ? reading : "";
+  }
+
+  function katakanaCandidateFromCompanyName(value) {
+    const source = String(value || "").normalize("NFKC").trim();
+    if (!/[ァ-ヶ]/.test(source)) return "";
+    if (!/[㐀-龯豈-﫿々〆]/.test(source)) return safeImeReading(source);
+    const segments = source.match(/[ァ-ヶー]+/g) || [];
+    return segments.length ? katakanaToHiragana(segments.join(" ")) : "";
+  }
+
+  function applyKanaCandidate(candidate) {
+    const reading = safeImeReading(candidate);
+    if (!reading || state.form.kanaManuallyEdited || KCN.cleanSingleLine(dom["company-name-kana"].value)) return false;
+    state.form.kanaInternalUpdate = true;
+    dom["company-name-kana"].value = reading;
+    state.form.kanaInternalUpdate = false;
+    state.form.kanaAutoCandidate = true;
+    dom["company-kana-hint"].textContent = "自動候補です。必要に応じて修正してください。";
+    dom["company-kana-hint"].classList.add("is-auto-candidate");
+    return true;
+  }
+
+  function rememberCompositionReading(value) {
+    const reading = safeImeReading(value);
+    if (reading) state.form.compositionReading = reading;
   }
 
   function resetCompanyForm() {
@@ -431,11 +589,20 @@
     dom["company-id"].value = "";
     dom["company-created-at"].value = "";
     state.form.areas = new Set();
-    state.form.propertyTypes = new Set();
+    state.form.purchaseTargetIds = new Set();
+    state.form.kanaManuallyEdited = false;
+    state.form.kanaAutoCandidate = false;
+    state.form.kanaInternalUpdate = false;
+    state.form.composing = false;
+    state.form.compositionReading = "";
     state.form.duplicateBypassSignature = "";
     state.form.formatBypassSignature = "";
     state.form.saving = false;
     state.form.dirty = false;
+    dom["company-name-kana"].value = "";
+    dom["company-kana-hint"].textContent = "IME入力中の読み、またはカタカナ名から自動候補を作れる場合があります。";
+    dom["company-kana-hint"].classList.remove("is-auto-candidate");
+    dom["custom-purchase-target"].value = "";
     dom["memo-count"].textContent = "0";
     hideFormMessages();
     renderFormChips();
@@ -456,18 +623,18 @@
     dom["company-id"].value = isDuplicate ? "" : company.id;
     dom["company-created-at"].value = isDuplicate ? "" : company.createdAt;
     dom["company-name"].value = isDuplicate ? `${company.companyName}（複製）` : company.companyName;
+    dom["company-name-kana"].value = isDuplicate ? "" : (company.companyNameKana || "");
     dom["contact-name"].value = company.contactName;
     dom["company-phone"].value = company.phone;
     dom["company-email"].value = company.email;
     dom["custom-area"].value = company.customArea;
+    dom["custom-purchase-target"].value = company.customPurchaseTarget || "";
     dom["company-favorite"].checked = company.isFavorite;
     dom["company-memo"].value = company.memo;
     dom["memo-count"].textContent = String(company.memo.length);
     state.form.areas = new Set(company.areas || []);
-    state.form.propertyTypes = new Set(company.propertyTypes || []);
-    const temperature = Object.values(KCN.TEMPERATURES).includes(company.temperature) ? company.temperature : KCN.TEMPERATURES.NORMAL;
-    const radio = dom["company-form"].querySelector(`input[name="temperature"][value="${temperature}"]`);
-    if (radio) radio.checked = true;
+    state.form.purchaseTargetIds = new Set(company.purchaseTargetIds || []);
+    state.form.kanaManuallyEdited = Boolean(company.companyNameKana && !isDuplicate);
     renderFormChips();
     dom["company-dialog-mode"].textContent = isDuplicate ? "DUPLICATE COMPANY" : "EDIT COMPANY";
     dom["company-dialog-title"].textContent = isDuplicate ? "複製して登録" : "業者を編集";
@@ -480,17 +647,18 @@
     const id = dom["company-id"].value || KCN.uuid();
     const existing = state.companies.find((company) => company.id === id);
     const now = KCN.isoNow();
-    const temperatureInput = dom["company-form"].querySelector('input[name="temperature"]:checked');
     return KCN.normalizeCompany({
       id,
       companyName: dom["company-name"].value,
+      companyNameKana: dom["company-name-kana"].value,
       contactName: dom["contact-name"].value,
       phone: dom["company-phone"].value,
       email: dom["company-email"].value,
       areas: [...state.form.areas],
       customArea: dom["custom-area"].value,
-      propertyTypes: [...state.form.propertyTypes],
-      temperature: temperatureInput ? temperatureInput.value : KCN.TEMPERATURES.NORMAL,
+      purchaseTargetIds: [...state.form.purchaseTargetIds],
+      customPurchaseTarget: dom["custom-purchase-target"].value,
+      legacyPurchaseTargets: existing ? existing.legacyPurchaseTargets : [],
       isFavorite: dom["company-favorite"].checked,
       memo: dom["company-memo"].value,
       createdAt: dom["company-created-at"].value || now,
@@ -522,7 +690,8 @@
     dom["form-warning"].replaceChildren(message, button);
     dom["form-warning"].hidden = false;
     ensureButtonLabels(dom["form-warning"]);
-    dom["form-warning"].scrollIntoView({ behavior: "smooth", block: "start" });
+    const body = dom["company-dialog"].querySelector(".dialog-body");
+    if (body) body.scrollTo({ top: Math.max(0, dom["form-warning"].offsetTop - 12), behavior: "smooth" });
   }
 
   function showDuplicateWarning(matches) {
@@ -548,7 +717,8 @@
     dom["duplicate-list"].replaceChildren(fragment);
     dom["duplicate-warning"].hidden = false;
     ensureButtonLabels(dom["duplicate-warning"]);
-    dom["duplicate-warning"].scrollIntoView({ behavior: "smooth", block: "start" });
+    const body = dom["company-dialog"].querySelector(".dialog-body");
+    if (body) body.scrollTo({ top: Math.max(0, dom["duplicate-warning"].offsetTop - 12), behavior: "smooth" });
   }
 
   async function saveCompany(event) {
@@ -596,13 +766,13 @@
     }
 
     state.form.dirty = false;
-    closeDialog(dom["company-dialog"], { force: true });
     try {
       await reloadData();
       showToast(`「${company.companyName}」を${label}しました。`);
     } catch (error) {
       showToast(`${label}は完了しましたが、画面を更新できませんでした。ページを再読み込みしてください。`, { duration: 8000 });
     } finally {
+      closeDialog(dom["company-dialog"], { force: true });
       state.form.saving = false;
       setLoading(false);
     }
@@ -633,20 +803,34 @@
     }
   }
 
+  function purchaseTargetDetailHtml(company) {
+    const selected = new Set((company.purchaseTargetIds || []).filter((id) => id !== "all"));
+    const sections = purchaseTargetGroups().filter((group) => group.id !== "bulk").map((group) => {
+      const labels = (group.options || []).filter((option) => selected.has(optionId(option))).map(optionLabel);
+      if (!labels.length) return "";
+      return `<div><dt>${KCN.escapeHtml(group.label)}</dt><dd><div class="tag-list">${tagsHtml(labels, 99)}</div></dd></div>`;
+    }).join("");
+    const legacy = (company.legacyPurchaseTargets || []).length
+      ? `<div><dt>旧形式から保持</dt><dd><div class="tag-list">${tagsHtml(company.legacyPurchaseTargets, 99)}</div></dd></div>` : "";
+    const custom = company.customPurchaseTarget
+      ? `<div><dt>その他補足</dt><dd class="preserve-lines">${KCN.escapeHtml(company.customPurchaseTarget)}</dd></div>` : "";
+    return sections || legacy || custom ? `${sections}${legacy}${custom}` : '<div><dt>買取対象</dt><dd>未登録</dd></div>';
+  }
+
   function renderDetail(company) {
     state.detailId = company.id;
     dom["detail-dialog-title"].textContent = company.companyName;
     const phoneLink = KCN.isPlausiblePhone(company.phone) ? KCN.phoneHref(company.phone) : "";
     const mailLink = KCN.mailtoHref(company.email, "買取案件のご相談");
     const favoriteLabel = company.isFavorite ? "お気に入りから外す" : "お気に入りに追加";
-    const areas = [...(company.areas || []), company.customArea].filter(Boolean);
+    const areas = [...(company.areas || []).map((area) => KCN.areaLabel ? KCN.areaLabel(area) : area), company.customArea].filter(Boolean);
     dom["detail-content"].innerHTML = `
       <div class="detail-hero">
         <div>
           <h3>${KCN.escapeHtml(company.companyName)}</h3>
+          ${company.companyNameKana ? `<p class="company-name-kana">${KCN.escapeHtml(company.companyNameKana)}</p>` : ""}
           <p>${company.contactName ? `担当：${KCN.escapeHtml(company.contactName)}` : "担当者 未登録"}</p>
           <div class="card-status-row">
-            <span class="temperature-badge temperature-badge--${selectedTemperatureClass(company.temperature)}">${KCN.escapeHtml(company.temperature)}</span>
             ${company.isSample ? '<span class="sample-badge">サンプル</span>' : ""}
             ${company.isArchived ? '<span class="sample-badge">アーカイブ</span>' : ""}
           </div>
@@ -660,6 +844,7 @@
       <section class="detail-section">
         <h4>連絡先</h4>
         <dl class="detail-list">
+          <div><dt>業者名よみがな</dt><dd>${company.companyNameKana ? KCN.escapeHtml(company.companyNameKana) : "未登録"}</dd></div>
           <div><dt>担当者</dt><dd>${company.contactName ? KCN.escapeHtml(company.contactName) : "未登録"}</dd></div>
           <div><dt>電話番号</dt><dd>${company.phone ? KCN.escapeHtml(company.phone) : "未登録"}</dd></div>
           <div><dt>メール</dt><dd>${company.email ? KCN.escapeHtml(company.email) : "未登録"}</dd></div>
@@ -669,8 +854,7 @@
         <h4>買取条件</h4>
         <dl class="detail-list">
           <div><dt>買取エリア</dt><dd><div class="tag-list">${tagsHtml(areas, 99)}</div></dd></div>
-          <div><dt>買取対象</dt><dd><div class="tag-list">${tagsHtml(company.propertyTypes, 99)}</div></dd></div>
-          <div><dt>温度感</dt><dd>${KCN.escapeHtml(company.temperature)}</dd></div>
+          ${purchaseTargetDetailHtml(company)}
           <div><dt>お気に入り</dt><dd>${company.isFavorite ? "登録済み" : "未登録"}</dd></div>
         </dl>
       </section>
@@ -852,7 +1036,6 @@
 
     state.restoreData = null;
     dom["restore-file-input"].value = "";
-    closeDialog(dom["restore-dialog"], { force: true });
     try {
       await reloadData();
       const companyCount = result.importedCompanies ?? result.imported ?? 0;
@@ -862,13 +1045,19 @@
     } catch (error) {
       showToast("復元は完了しましたが、画面を更新できませんでした。ページを再読み込みしてください。", { duration: 8000 });
     } finally {
+      closeDialog(dom["restore-dialog"], { force: true });
       setLoading(false);
     }
   }
 
   function openOptionSettings() {
-    dom["area-options-text"].value = (state.settings.areaOptions || []).join("\n");
-    dom["property-options-text"].value = (state.settings.propertyTypeOptions || []).join("\n");
+    const core = new Set(KCN.AREA_IDS || []);
+    dom["area-options-text"].value = (state.settings.areaOptions || [])
+      .filter((area) => !core.has(optionId(area)))
+      .map((area) => KCN.areaLabel ? KCN.areaLabel(optionId(area)) : optionLabel(area))
+      .join("\n");
+    dom["property-options-summary"].textContent = purchaseTargetGroups().filter((group) => group.id !== "bulk")
+      .map((group) => `${group.label}：${(group.options || []).map(optionLabel).join("、")}`).join("／");
     dom["option-error"].hidden = true;
     openDialog(dom["option-dialog"], dom["area-options-text"]);
   }
@@ -879,16 +1068,10 @@
 
   async function saveOptionSettings(event) {
     event.preventDefault();
-    const areaOptions = linesToOptions(dom["area-options-text"].value);
-    const propertyTypeOptions = linesToOptions(dom["property-options-text"].value);
-    if (!areaOptions.length || !propertyTypeOptions.length) {
-      dom["option-error"].textContent = "エリア候補と買取対象候補を、それぞれ1件以上入力してください。";
-      dom["option-error"].hidden = false;
-      return;
-    }
+    const areaOptions = [...(KCN.AREA_IDS || []), ...linesToOptions(dom["area-options-text"].value)];
     setLoading(true, "候補を保存中");
     try {
-      state.settings = await KCN.db.putSettings({ areaOptions, propertyTypeOptions });
+      state.settings = await KCN.db.putSettings({ areaOptions, propertyTypeOptions: [...(KCN.PURCHASE_TARGET_IDS || [])] });
       closeDialog(dom["option-dialog"], { force: true });
       renderEverything();
       showToast("候補を保存しました。");
@@ -943,8 +1126,23 @@
 
   function registerServiceWorker() {
     if (!['http:', 'https:'].includes(location.protocol) || !("serviceWorker" in navigator)) return;
+    let refreshing = false;
+    const wasControlledAtStartup = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      // 初回インストール時のclaimでは読み込んだ資産は既に最新版のため再読込しない。
+      // ここで再読込すると、直後に開いた登録ダイアログの入力を失う競合が起きる。
+      if (!wasControlledAtStartup) return;
+      if (refreshing) return;
+      const hasUnsaved = state.form.dirty || (KCN.caseUI && KCN.caseUI.hasUnsavedChanges());
+      if (hasUnsaved) {
+        showToast("アプリ更新の準備ができました。入力を保存してから再読み込みしてください。", { duration: 9000 });
+        return;
+      }
+      refreshing = true;
+      global.location.reload();
+    });
     global.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch((error) => {
+      navigator.serviceWorker.register("./sw.js?v=prototype3", { scope: "./", updateViaCache: "none" }).catch((error) => {
         console.warn("Service Workerを登録できませんでした。", error);
       });
     }, { once: true });
@@ -953,15 +1151,24 @@
   function handleChipClick(button) {
     const scope = button.dataset.chipScope;
     const value = button.dataset.value;
-    const container = button.parentElement;
+    const catalog = button.closest("[data-chip-group]");
     let set;
     if (scope === "search-areas") set = state.search.areas;
-    if (scope === "search-property-types") set = state.search.propertyTypes;
+    if (scope === "search-purchase-targets") set = state.search.purchaseTargetIds;
     if (scope === "form-areas") set = state.form.areas;
-    if (scope === "form-property-types") set = state.form.propertyTypes;
+    if (scope === "form-purchase-targets") set = state.form.purchaseTargetIds;
     if (!set) return;
-    if (set.has(value)) set.delete(value);
-    else set.add(value);
+    if (set.has(value)) {
+      set.delete(value);
+    } else {
+      set.add(value);
+      if (scope.endsWith("areas") && KCN.AREA_INCLUSION_RULES && KCN.AREA_INCLUSION_RULES[value]) {
+        KCN.AREA_INCLUSION_RULES[value].forEach((area) => set.add(area));
+      }
+      if (scope.endsWith("purchase-targets") && value === "all") {
+        (KCN.PURCHASE_TARGET_ALL_IDS || []).forEach((id) => set.add(id));
+      }
+    }
     if (scope.startsWith("form-")) {
       state.form.dirty = true;
       state.form.duplicateBypassSignature = "";
@@ -972,12 +1179,32 @@
       renderAllOptionControls();
       renderSearchResults();
     }
-    const replacement = Array.from(container.querySelectorAll("[data-chip-scope]")).find((item) => item.dataset.value === value);
+    const replacement = catalog ? Array.from(catalog.querySelectorAll("[data-chip-scope]")).find((item) => item.dataset.value === value) : null;
     if (replacement) requestAnimationFrame(() => replacement.focus({ preventScroll: true }));
   }
 
+  function clearChipScope(scope) {
+    if (scope === "search-areas") state.search.areas.clear();
+    if (scope === "search-purchase-targets") state.search.purchaseTargetIds.clear();
+    if (scope === "form-areas") state.form.areas.clear();
+    if (scope === "form-purchase-targets") state.form.purchaseTargetIds.clear();
+    if (scope.startsWith("form-")) {
+      state.form.dirty = true;
+      renderFormChips();
+    } else {
+      renderAllOptionControls();
+      renderSearchResults();
+    }
+  }
+
   function bindEvents() {
-    document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => switchScreen(button.dataset.nav)));
+    const navRoot = document.querySelector(".bottom-nav__inner");
+    navRoot.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-route]");
+      if (!button || !navRoot.contains(button)) return;
+      event.preventDefault();
+      navigate(button.dataset.route);
+    });
     dom["add-company-fab"].addEventListener("click", () => {
       if (state.currentScreen === "cases" && KCN.caseUI) KCN.caseUI.openNewCase();
       else openNewCompany();
@@ -985,17 +1212,6 @@
     dom["clear-search"].addEventListener("click", clearSearchFilters);
     dom["clear-list-filters"].addEventListener("click", clearListFilters);
 
-    dom["search-temperature"].addEventListener("click", (event) => {
-      const button = event.target.closest("[data-temperature]");
-      if (!button) return;
-      state.search.temperature = button.dataset.temperature;
-      dom["search-temperature"].querySelectorAll("[data-temperature]").forEach((item) => {
-        const selected = item === button;
-        item.classList.toggle("is-selected", selected);
-        item.setAttribute("aria-pressed", String(selected));
-      });
-      renderSearchResults();
-    });
     dom["search-favorite-only"].addEventListener("change", () => {
       state.search.favoriteOnly = dom["search-favorite-only"].checked;
       renderSearchResults();
@@ -1008,9 +1224,23 @@
     dom["list-query"].addEventListener("input", () => { state.list.query = dom["list-query"].value; renderCompanyList(); });
     dom["list-sort"].addEventListener("change", () => { state.list.sort = dom["list-sort"].value; renderCompanyList(); });
     dom["list-favorite-only"].addEventListener("change", () => { state.list.favoriteOnly = dom["list-favorite-only"].checked; renderCompanyList(); });
-    dom["list-temperature"].addEventListener("change", () => { state.list.temperature = dom["list-temperature"].value; renderCompanyList(); });
     dom["list-area"].addEventListener("change", () => { state.list.area = dom["list-area"].value; renderCompanyList(); });
-    dom["list-property-type"].addEventListener("change", () => { state.list.propertyType = dom["list-property-type"].value; renderCompanyList(); });
+    dom["list-property-type"].addEventListener("change", () => { state.list.purchaseTargetId = dom["list-property-type"].value; renderCompanyList(); });
+
+    dom["company-name"].addEventListener("compositionstart", () => {
+      state.form.composing = true;
+      state.form.compositionReading = "";
+    });
+    dom["company-name"].addEventListener("compositionupdate", (event) => rememberCompositionReading(event.data));
+    dom["company-name"].addEventListener("beforeinput", (event) => {
+      if (event.inputType && event.inputType.includes("Composition")) rememberCompositionReading(event.data);
+    });
+    dom["company-name"].addEventListener("compositionend", (event) => {
+      rememberCompositionReading(event.data);
+      state.form.composing = false;
+      if (!applyKanaCandidate(state.form.compositionReading)) applyKanaCandidate(katakanaCandidateFromCompanyName(dom["company-name"].value));
+      state.form.compositionReading = "";
+    });
 
     dom["company-form"].addEventListener("submit", saveCompany);
     dom["company-form"].addEventListener("input", (event) => {
@@ -1019,6 +1249,13 @@
         dom["company-name"].removeAttribute("aria-invalid");
         dom["company-name"].removeAttribute("aria-describedby");
         dom["form-error"].hidden = true;
+      }
+      if (event.target === dom["company-name"] && !state.form.composing) applyKanaCandidate(katakanaCandidateFromCompanyName(dom["company-name"].value));
+      if (event.target === dom["company-name-kana"] && !state.form.kanaInternalUpdate) {
+        state.form.kanaManuallyEdited = true;
+        state.form.kanaAutoCandidate = false;
+        dom["company-kana-hint"].textContent = "手入力したよみがなを保存します。";
+        dom["company-kana-hint"].classList.remove("is-auto-candidate");
       }
       state.form.dirty = true;
       state.form.duplicateBypassSignature = "";
@@ -1030,6 +1267,9 @@
       state.form.duplicateBypassSignature = "";
       state.form.formatBypassSignature = "";
       dom["duplicate-warning"].hidden = true;
+    });
+    dom["company-name-kana"].addEventListener("blur", () => {
+      dom["company-name-kana"].value = katakanaToHiragana(dom["company-name-kana"].value);
     });
     dom["continue-duplicate-save"].addEventListener("click", () => {
       const company = readCompanyForm();
@@ -1046,8 +1286,7 @@
     dom["open-option-settings"].addEventListener("click", openOptionSettings);
     dom["option-form"].addEventListener("submit", saveOptionSettings);
     dom["reset-options"].addEventListener("click", () => {
-      dom["area-options-text"].value = KCN.AREA_OPTIONS.join("\n");
-      dom["property-options-text"].value = KCN.PROPERTY_TYPE_OPTIONS.join("\n");
+      dom["area-options-text"].value = "";
       dom["option-error"].hidden = true;
     });
     dom["delete-samples"].addEventListener("click", removeSamples);
@@ -1056,6 +1295,11 @@
     dom["loading-overlay"].addEventListener("cancel", (event) => event.preventDefault());
 
     document.addEventListener("click", async (event) => {
+      const clearChips = event.target.closest("[data-clear-chip-scope]");
+      if (clearChips) {
+        clearChipScope(clearChips.dataset.clearChipScope);
+        return;
+      }
       const chip = event.target.closest("[data-chip-scope]");
       if (chip) {
         handleChipClick(chip);
@@ -1088,7 +1332,7 @@
       if (duplicateDetail) {
         state.reopenFormAfterDetail = true;
         state.suppressFocusRestore.add("company-dialog");
-        dom["company-dialog"].close();
+        closeDialog(dom["company-dialog"], { force: true });
         openDetail(duplicateDetail.dataset.duplicateDetailId);
         return;
       }
@@ -1146,6 +1390,7 @@
         closeDialog(dialog);
       });
       dialog.addEventListener("close", () => {
+        syncBodyScrollLock();
         if (dialog === dom["restore-dialog"]) {
           state.restoreData = null;
           dom["restore-file-input"].value = "";
@@ -1156,9 +1401,19 @@
         restoreDialogFocus(dialog);
       });
     });
+    document.addEventListener("close", syncBodyScrollLock, true);
 
     global.addEventListener("online", updateConnectionStatus);
     global.addEventListener("offline", updateConnectionStatus);
+    global.addEventListener("popstate", () => {
+      const route = global.location.hash.replace(/^#/, "");
+      navigate(Object.prototype.hasOwnProperty.call(ROUTES, route) ? route : "search", { history: "none" });
+    });
+    global.addEventListener("resize", updateVisualViewportHeight, { passive: true });
+    if (global.visualViewport) {
+      global.visualViewport.addEventListener("resize", updateVisualViewportHeight, { passive: true });
+      global.visualViewport.addEventListener("scroll", updateVisualViewportHeight, { passive: true });
+    }
     global.addEventListener("beforeunload", (event) => {
       const companyDirty = state.form.dirty && (dom["company-dialog"].open || state.reopenFormAfterDetail);
       const caseDirty = KCN.caseUI && KCN.caseUI.hasUnsavedChanges();
@@ -1170,6 +1425,7 @@
 
   async function initialize() {
     cacheDom();
+    updateVisualViewportHeight();
     bindEvents();
     updateConnectionStatus();
     registerServiceWorker();
@@ -1182,6 +1438,8 @@
       dom["list-sort"].value = state.list.sort;
       renderEverything();
       state.initialized = true;
+      const requestedRoute = global.location.hash.replace(/^#/, "");
+      navigate(Object.prototype.hasOwnProperty.call(ROUTES, requestedRoute) ? requestedRoute : "search", { history: "replace" });
     } catch (error) {
       console.error("アプリを初期化できませんでした。", error);
       setFatal("アプリを起動できませんでした。ページを再読み込みしてください。");
@@ -1198,7 +1456,11 @@
     clearListFilters,
     openNewCompany,
     openDetail,
+    navigate,
     switchScreen,
+    katakanaToHiragana,
+    safeImeReading,
+    applyKanaCandidate,
     getSearchResults,
     getListResults,
     showToast,

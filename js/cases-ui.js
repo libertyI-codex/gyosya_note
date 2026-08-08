@@ -99,6 +99,20 @@
     return optionList("RESPONSE_REASONS");
   }
 
+  function areaOptions() {
+    const core = optionList("AREA_OPTIONS");
+    const settings = baseState().settings || KCN.DEFAULT_SETTINGS;
+    const extra = Array.isArray(settings.areaOptions) ? settings.areaOptions : [];
+    const seen = new Set();
+    return [...core, ...extra.map((id) => ({ id, label: KCN.areaLabel ? KCN.areaLabel(id) : id }))]
+      .filter((option) => {
+        const id = optionId(option);
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+  }
+
   function optionId(option) {
     return typeof option === "string" ? option : option.id;
   }
@@ -223,7 +237,7 @@
       return [response.memo, response.responseReason, company.companyName, company.contactName];
     });
     return KCN.normalizeText([
-      item.caseName, item.location, item.area, item.customArea,
+      item.caseName, item.location, KCN.areaLabel ? KCN.areaLabel(item.area) : item.area, item.customArea,
       typeLabel(item.caseType, item.customCaseType),
       ...(item.factors || []).map(factorLabel), item.memo, ...responseText
     ].join(" "));
@@ -268,7 +282,7 @@
   function caseCardHtml(item) {
     const stats = caseStats(item);
     const factors = (item.factors || []).map(factorLabel);
-    const place = item.location || item.customArea || item.area || "所在地・エリア未登録";
+    const place = item.location || item.customArea || (KCN.areaLabel ? KCN.areaLabel(item.area) : item.area) || "所在地・エリア未登録";
     return `<article class="case-card" data-case-id="${escape(item.id)}">
       <button type="button" class="case-card__open" data-open-case-id="${escape(item.id)}" aria-label="${escape(item.caseName)}の詳細を開く">
         <div class="case-card__top"><div><h3>${escape(item.caseName)}</h3><p>${escape(place)}</p></div><span class="case-status case-status--${escape(item.status)}">${escape(item.status)}</span></div>
@@ -308,8 +322,7 @@
 
   function renderCaseFilters() {
     if (!dom["case-area-filter"]) return;
-    const settings = baseState().settings || KCN.DEFAULT_SETTINGS;
-    populateSelect(dom["case-area-filter"], settings.areaOptions || [], "すべて", ui.filters.area);
+    populateSelect(dom["case-area-filter"], areaOptions(), "すべて", ui.filters.area);
     populateSelect(dom["case-type-filter"], caseTypes(), "すべて", ui.filters.caseType);
     populateSelect(dom["case-factor-filter"], factorOptions(), "すべて", ui.filters.factor);
     ui.filters.area = dom["case-area-filter"].value;
@@ -410,8 +423,7 @@
   }
 
   function renderCaseFormOptions(selectedType) {
-    const settings = baseState().settings || KCN.DEFAULT_SETTINGS;
-    populateSelect(dom["case-area"], settings.areaOptions || [], "未選択", dom["case-area"] ? dom["case-area"].value : "");
+    populateSelect(dom["case-area"], areaOptions(), "未選択", dom["case-area"] ? dom["case-area"].value : "");
     populateSelect(dom["case-status"], caseStatuses(), "相談中", dom["case-status"] ? dom["case-status"].value : "相談中");
     if (dom["case-status"] && !dom["case-status"].value) dom["case-status"].value = "相談中";
     renderCaseTypeControl(selectedType);
@@ -545,12 +557,16 @@
     try {
       await KCN.db.putCase(item);
       ui.caseForm.dirty = false;
+      try {
+        await reload();
+        if (ui.caseForm.mode === "edit" && ui.selectedCaseId === item.id && dom["case-detail-dialog"].open) renderCaseDetail(item.id);
+        app().showToast(`「${item.caseName}」を保存しました。`);
+      } catch (reloadError) {
+        app().showToast("保存は完了しましたが、画面を更新できませんでした。ページを再読み込みしてください。", { duration: 8000 });
+      }
       app().closeDialog(dom["case-dialog"], { force: true });
-      await reload();
-      if (ui.caseForm.mode === "edit" && ui.selectedCaseId === item.id && dom["case-detail-dialog"].open) renderCaseDetail(item.id);
       if (dom["case-detail-dialog"].open) focusSoon(dom["case-detail-dialog"].querySelector(".dialog-header .icon-button"));
       else focusSoon(dom["case-list"].querySelector(`[data-open-case-id="${CSS.escape(item.id)}"]`) || dom["case-query"]);
-      app().showToast(`「${item.caseName}」を保存しました。`);
     } catch (error) {
       dom["case-form-error"].textContent = error.message || "案件を保存できませんでした。";
       dom["case-form-error"].hidden = false;
@@ -627,10 +643,10 @@
     dom["case-detail-title"].textContent = item.caseName;
     const factors = item.factors || [];
     dom["case-detail-content"].innerHTML = `<article class="case-overview">
-      <div class="case-overview__hero"><div><h3>${escape(item.caseName)}</h3><p>${escape(item.location || item.customArea || item.area || "所在地・エリア未登録")}</p></div><span class="case-status">${escape(item.status)}</span></div>
+      <div class="case-overview__hero"><div><h3>${escape(item.caseName)}</h3><p>${escape(item.location || item.customArea || (KCN.areaLabel ? KCN.areaLabel(item.area) : item.area) || "所在地・エリア未登録")}</p></div><span class="case-status">${escape(item.status)}</span></div>
       <dl class="detail-list">
         <div><dt>所在地</dt><dd>${escape(item.location || "未登録")}</dd></div>
-        <div><dt>エリア</dt><dd>${escape([item.area, item.customArea].filter(Boolean).join("／") || "未登録")}</dd></div>
+        <div><dt>エリア</dt><dd>${escape([(KCN.areaLabel ? KCN.areaLabel(item.area) : item.area), item.customArea].filter(Boolean).join("／") || "未登録")}</dd></div>
         <div><dt>案件種別</dt><dd>${escape(typeLabel(item.caseType, item.customCaseType))}</dd></div>
         <div><dt>個別要因</dt><dd><div class="tag-list">${factors.length ? factors.map((id) => `<span class="tag">${escape(factorLabel(id))}</span>`).join("") : "未登録"}</div></dd></div>
         <div><dt>売主希望額</dt><dd>${escape(formatMoney(item.askingPrice))}</dd></div>
@@ -670,9 +686,9 @@
     app().setLoading(true, "案件と回答を削除中");
     try {
       await KCN.db.deleteCaseWithResponses(caseId);
-      app().closeDialog(dom["case-detail-dialog"], { force: true });
       ui.selectedCaseId = null;
       await reload();
+      app().closeDialog(dom["case-detail-dialog"], { force: true });
       focusSoon(baseState().currentScreen === "cases" ? dom["case-query"] : document.querySelector('[data-nav][aria-current="page"]'));
       app().showToast(`「${item.caseName}」を削除しました。`);
     } catch (error) {
@@ -770,9 +786,9 @@
     try {
       await KCN.db.putCaseResponse(response);
       ui.responseForm.dirty = false;
-      app().closeDialog(dom["response-dialog"], { force: true });
       await reload();
       renderCaseDetail(response.caseId);
+      app().closeDialog(dom["response-dialog"], { force: true });
       focusSoon(dom["case-response-list"].querySelector(`[data-response-id="${CSS.escape(response.id)}"] [data-edit-response-id]`) || dom["case-add-companies"]);
       app().showToast("業者回答を保存しました。");
     } catch (error) {
@@ -803,36 +819,27 @@
     }
   }
 
-  function mappedPropertyTypes(caseType) {
-    const mapping = {
-      "detached-single-lot": ["戸建"],
-      "detached-subdivision": ["戸建"],
-      "income-building": ["一棟収益", "一棟アパート", "一棟マンション"],
-      "condo-vacant": ["区分マンション"],
-      "condo-occupied": ["区分マンション"],
-      "land": ["土地"],
-      "business-land": ["土地", "店舗・事務所"],
-      "shop-office": ["店舗・事務所"],
-      "building": ["ビル"]
-    };
-    return mapping[caseType] || [];
-  }
-
   function recommendationInfo(company, item) {
     const areaMatch = Boolean(item.area && KCN.areaMatches(company.areas || [], [item.area]));
-    const mapped = mappedPropertyTypes(item.caseType);
-    const typeMatch = mapped.length > 0 && mapped.some((type) => (company.propertyTypes || []).includes(type));
+    const targets = new Set(company.purchaseTargetIds || []);
+    const typeMatch = Boolean(item.caseType && targets.has(item.caseType));
+    const matchingFactors = (item.factors || []).filter((id) => targets.has(id));
     const factors = new Set(item.factors || []);
-    const similarHistory = new Set(ui.responses.filter((response) => response.companyId === company.id
-      && (response.responseFactors || []).some((id) => factors.has(id))).map((response) => response.caseId)).size;
+    const companyResponses = ui.responses.filter((response) => response.companyId === company.id);
+    const similarHistory = new Set(companyResponses.filter((response) => {
+      const previousCase = caseById(response.caseId);
+      return previousCase && ((item.caseType && previousCase.caseType === item.caseType)
+        || (previousCase.factors || []).some((id) => factors.has(id)));
+    }).map((response) => response.caseId)).size;
+    const successHistory = companyResponses.filter((response) => response.responseStatus === "成約").length;
     let score = 0;
     if (areaMatch) score += 100;
     if (typeMatch) score += 80;
+    score += Math.min(matchingFactors.length, 10) * 20;
     if (company.isFavorite) score += 40;
-    if (company.temperature === KCN.TEMPERATURES.ACTIVE) score += 30;
-    else if (company.temperature === KCN.TEMPERATURES.NORMAL) score += 10;
     score += Math.min(similarHistory, 10) * 8;
-    return { areaMatch, typeMatch, similarHistory, score };
+    score += Math.min(successHistory, 10) * 25;
+    return { areaMatch, typeMatch, matchingFactors, similarHistory, successHistory, score };
   }
 
   function candidateCompanies(item) {
@@ -840,7 +847,7 @@
     const query = KCN.normalizeText(dom["quick-company-query"] ? dom["quick-company-query"].value : "");
     return baseState().companies.filter((company) => !company.isArchived && !existing.has(company.id)).filter((company) => {
       if (!query) return true;
-      return KCN.normalizeText(`${company.companyName} ${company.contactName}`).includes(query);
+      return KCN.normalizeText(`${company.companyName} ${company.companyNameKana || ""} ${company.contactName}`).includes(query);
     }).map((company) => ({ company, ...recommendationInfo(company, item) })).sort((a, b) => b.score - a.score
       || KCN.compareCompanies(a.company, b.company, "search"));
   }
@@ -859,7 +866,7 @@
       const selected = ui.selectedCompanies.has(company.id);
       return `<label class="selectable-company${selected ? " is-selected" : ""}">
         <input type="checkbox" data-select-company-id="${escape(company.id)}" ${selected ? "checked" : ""}>
-        <span class="selectable-company__body"><strong>${escape(company.companyName)}${company.isFavorite ? " ★" : ""}</strong><small>${company.contactName ? `担当：${escape(company.contactName)}／` : ""}${escape(company.temperature)}</small><span class="match-badges"><i class="${entry.areaMatch ? "is-match" : ""}">${entry.areaMatch ? "エリア一致" : "エリア不一致"}</i><i class="${entry.typeMatch ? "is-match" : ""}">${entry.typeMatch ? "種別一致" : "種別不一致"}</i><i>類似回答 ${entry.similarHistory}件</i></span></span>
+        <span class="selectable-company__body"><strong>${escape(company.companyName)}${company.isFavorite ? " ★" : ""}</strong><small>${company.companyNameKana ? `${escape(company.companyNameKana)}／` : ""}${company.contactName ? `担当：${escape(company.contactName)}` : "担当者 未登録"}</small><span class="match-badges"><i class="${entry.areaMatch ? "is-match" : ""}">${entry.areaMatch ? "エリア一致" : "エリア不一致"}</i><i class="${entry.typeMatch ? "is-match" : ""}">${entry.typeMatch ? "案件種別一致" : "案件種別不一致"}</i><i class="${entry.matchingFactors.length ? "is-match" : ""}">個別要因${entry.matchingFactors.length}件一致</i><i>類似案件回答 ${entry.similarHistory}件</i>${entry.successHistory ? `<i class="is-match">成約 ${entry.successHistory}件</i>` : ""}</span></span>
       </label>`;
     }).join("") : '<div class="empty-state empty-state--compact"><h4>追加できる業者がありません</h4><p>登録済みの全業者が追加済みか、検索条件に該当しません。</p></div>';
   }
@@ -893,10 +900,10 @@
     app().setLoading(true, `${responses.length}社を追加中`);
     try {
       await KCN.db.addCaseResponses(responses);
-      app().closeDialog(dom["quick-company-dialog"], { force: true });
       ui.selectedCompanies.clear();
       await reload();
       renderCaseDetail(item.id);
+      app().closeDialog(dom["quick-company-dialog"], { force: true });
       focusSoon(dom["case-add-companies"]);
       app().showToast(`${responses.length}社を案件へ追加しました。`);
     } catch (error) {
@@ -928,7 +935,7 @@
     const results = similarCases(source);
     dom["similar-source-case-id"].value = source.id;
     dom["similar-source-case-name"].textContent = source.caseName;
-    dom["similar-source-case-conditions"].textContent = `${typeLabel(source.caseType, source.customCaseType)}／${(source.factors || []).map(factorLabel).join("・") || "個別要因なし"}／${source.area || "エリア未選択"}`;
+    dom["similar-source-case-conditions"].textContent = `${typeLabel(source.caseType, source.customCaseType)}／${(source.factors || []).map(factorLabel).join("・") || "個別要因なし"}／${source.area ? (KCN.areaLabel ? KCN.areaLabel(source.area) : source.area) : "エリア未選択"}`;
     dom["similar-cases-summary"].textContent = `${results.length}件。案件種別、共通要因数、エリア、更新日の順で判定しています。`;
     dom["similar-cases-list"].innerHTML = results.length ? results.map(({ item, commonFactors, typeMatch, areaMatch }) => {
       const responses = responsesForCase(item.id);
@@ -1151,22 +1158,24 @@
       const caseFactor = event.target.closest("[data-case-factor-value]");
       if (caseFactor) {
         const id = caseFactor.dataset.caseFactorValue;
-        if (ui.caseForm.factors.has(id)) ui.caseForm.factors.delete(id); else ui.caseForm.factors.add(id);
+        const selected = !ui.caseForm.factors.has(id);
+        if (selected) ui.caseForm.factors.add(id); else ui.caseForm.factors.delete(id);
         ui.caseForm.dirty = true;
-        renderCaseFactorControl();
-        const replacement = dom["case-factor-chips"].querySelector(`[data-case-factor-value="${CSS.escape(id)}"]`);
-        if (replacement) replacement.focus({ preventScroll: true });
+        caseFactor.classList.toggle("is-selected", selected);
+        caseFactor.setAttribute("aria-pressed", String(selected));
+        if (dom["case-factor-count"]) dom["case-factor-count"].textContent = `${ui.caseForm.factors.size}件選択`;
+        caseFactor.focus({ preventScroll: true });
         return;
       }
       const responseFactor = event.target.closest("[data-response-factor-value]");
       if (responseFactor) {
         const id = responseFactor.dataset.responseFactorValue;
-        if (ui.responseForm.factors.has(id)) ui.responseForm.factors.delete(id); else ui.responseForm.factors.add(id);
+        const selected = !ui.responseForm.factors.has(id);
+        if (selected) ui.responseForm.factors.add(id); else ui.responseForm.factors.delete(id);
         ui.responseForm.dirty = true;
-        const item = caseById(dom["response-case-id"].value);
-        renderResponseFactorControl(item);
-        const replacement = dom["response-factor-chips"].querySelector(`[data-response-factor-value="${CSS.escape(id)}"]`);
-        if (replacement) replacement.focus({ preventScroll: true });
+        responseFactor.classList.toggle("is-selected", selected);
+        responseFactor.setAttribute("aria-pressed", String(selected));
+        responseFactor.focus({ preventScroll: true });
         return;
       }
       const editResponse = event.target.closest("[data-edit-response-id]");

@@ -25,9 +25,9 @@ function makeResponse(overrides = {}) {
   return K.normalizeCaseResponse({ id: "response-1", caseId: "case-1", companyId: "company-1", responseStatus: "打診済み", responseAmount: null, responseDate: "", responseFactors: [], responseReason: "", memo: "", followUpDate: "", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-02T00:00:00.000Z", ...overrides });
 }
 
-test("Prototype2の版・DB版", () => {
-  assert.equal(K.APP.versionNumber, "1.0.0-prototype.2");
-  assert.equal(K.APP.schemaVersion, 2);
+test("Prototype3の版・DB版", () => {
+  assert.equal(K.APP.versionNumber, "1.0.0-prototype.3");
+  assert.equal(K.APP.schemaVersion, 3);
   assert.equal(K.APP.dbVersion, 2);
 });
 
@@ -132,11 +132,11 @@ test("案件検索はtype・factor・area・queryをAND", () => {
   assert.equal(K.matchesCase(item, { area: "横浜", caseType: "land" }), false);
 });
 
-test("案件回答CSVは23列・回答0件も1行", () => {
+test("案件回答CSVは24列・回答0件も1行", () => {
   const csv = K.buildCaseResponsesCsv([makeCase()], [], []);
   const lines = csv.slice(1).split("\r\n");
   assert.equal(lines.length, 2);
-  assert.equal((lines[0].match(/","/g) || []).length + 1, 23);
+  assert.equal((lines[0].match(/","/g) || []).length + 1, 24);
   assert.ok(lines[1].includes("横浜市南区・古家付き土地"));
 });
 
